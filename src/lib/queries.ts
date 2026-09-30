@@ -1,0 +1,205 @@
+import "server-only";
+
+import { createServerSupabase } from "@/lib/supabase/server";
+import type { Lead, LeadStatus, WebsiteAnalysis } from "@/lib/types";
+
+export type DashboardStats = {
+  totalLeads: number;
+  analyzedWebsites: number;
+  interestingLeads: number;
+  byStatus: Record<LeadStatus, number>;
+};
+
+const EMPTY_STATUS_COUNTS: Record<LeadStatus, number> = {
+  NEW: 0,
+  ANALYZED: 0,
+  REVIEW: 0,
+  TO_CONTACT: 0,
+  CONTACTED: 0,
+  REPLIED: 0,
+  MEETING: 0,
+  OFFER: 0,
+  WON: 0,
+  LOST: 0,
+  ARCHIVED: 0,
+};
+
+/** Ab diesem Score gilt ein Lead als „interessant" (Band ab 60). */
+export const INTERESTING_SCORE_THRESHOLD = 60;
+
+export async function loadDashboardStats(organizationId: string): Promise<DashboardStats> {
+  const supabase = await createServerSupabase();
+
+  const [{ data: leadRows, error: leadError }, { count: analysisCount }] = await Promise.all([
+    supabase
+      .from("leads")
+      .select("status, potential_score")
+      .eq("organization_id", organizationId),
+    supabase
+      .from("website_analyses")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("status", "SUCCESS"),
+  ]);
+
+  if (leadError) throw new Error(`Leads konnten nicht geladen werden: ${leadError.message}`);
+
+  const byStatus = { ...EMPTY_STATUS_COUNTS };
+  let interestingLeads = 0;
+
+  for (const row of leadRows ?? []) {
+    const status = row.status as LeadStatus;
+    byStatus[status] = (byStatus[status] ?? 0) + 1;
+    if ((row.potential_score ?? 0) >= INTERESTING_SCORE_THRESHOLD && status !== "ARCHIVED") {
+      interestingLeads += 1;
+    }
+  }
+
+  return {
+    totalLeads: (leadRows ?? []).length,
+    analyzedWebsites: analysisCount ?? 0,
+    interestingLeads,
+    byStatus,
+  };
+}
+
+export async function loadRecentLeads(organizationId: string, limit = 8): Promise<Lead[]> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .neq("status", "ARCHIVED")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`Leads konnten nicht geladen werden: ${error.message}`);
+  return (data ?? []) as Lead[];
+}
+
+export type LeadFilters = {
+  search?: string;
+  status?: LeadStatus | "ALL" | "ACTIVE";
+  city?: string;
+  industry?: string;
+  sort?: "score" | "created" | "company";
+};
+
+export async function loadLeads(
+  organizationId: string,
+  filters: LeadFilters,
+): Promise<Lead[]> {
+  const supabase = await createServerSupabase();
+  let query = supabase.from("leads").select("*").eq("organization_id", organizationId);
+
+  if (!filters.status || filters.status === "ACTIVE") {
+    query = query.neq("status", "ARCHIVED");
+  } else if (filters.status !== "ALL") {
+    query = query.eq("status", filters.status);
+  }
+
+  if (filters.city) query = query.ilike("city", `%${escapeLike(filters.city)}%`);
+  if (filters.industry) query = query.ilike("industry", `%${escapeLike(filters.industry)}%`);
+
+  if (filters.search) {
+    const term = `%${escapeLike(filters.search)}%`;
+    query = query.or(
+      [
+        `company_name.ilike.${term}`,
+        `domain.ilike.${term}`,
+        `city.ilike.${term}`,
+        `industry.ilike.${term}`,
+        `contact_person.ilike.${term}`,
+        `email.ilike.${term}`,
+      ].join(","),
+    );
+  }
+
+  if (filters.sort === "company") query = query.order("company_name", { ascending: true });
+  else if (filters.sort === "created") query = query.order("created_at", { ascending: false });
+  else query = query.order("potential_score", { ascending: false, nullsFirst: false });
+
+  const { data, error } = await query.limit(300);
+  if (error) throw new Error(`Leads konnten nicht geladen werden: ${error.message}`);
+  return (data ?? []) as Lead[];
+}
+
+/** Vorhandene Orte und Branchen für die Filter-Auswahllisten. */
+export async function loadLeadFacets(
+  organizationId: string,
+): Promise<{ cities: string[]; industries: string[] }> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("city, industry")
+    .eq("organization_id", organizationId)
+    .limit(1000);
+
+  if (error) return { cities: [], industries: [] };
+
+  const cities = new Set<string>();
+  const industries = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.city) cities.add(row.city as string);
+    if (row.industry) industries.add(row.industry as string);
+  }
+
+  const collator = new Intl.Collator("de-DE");
+  return {
+    cities: [...cities].sort(collator.compare),
+    industries: [...industries].sort(collator.compare),
+  };
+}
+
+export async function loadLead(organizationId: string, leadId: string): Promise<Lead | null> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as Lead;
+}
+
+export async function loadAnalyses(
+  organizationId: string,
+  options: { leadId?: string; limit?: number } = {},
+): Promise<WebsiteAnalysis[]> {
+  const supabase = await createServerSupabase();
+  let query = supabase
+    .from("website_analyses")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(options.limit ?? 50);
+
+  if (options.leadId) query = query.eq("lead_id", options.leadId);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`Analysen konnten nicht geladen werden: ${error.message}`);
+  return (data ?? []) as WebsiteAnalysis[];
+}
+
+export async function loadAnalysis(
+  organizationId: string,
+  analysisId: string,
+): Promise<WebsiteAnalysis | null> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("website_analyses")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("id", analysisId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as WebsiteAnalysis;
+}
+
+/** Schützt vor unbeabsichtigten Wildcards in Nutzereingaben. */
+function escapeLike(value: string): string {
+  return value.replace(/[%_\\,]/g, (match) => `\\${match}`);
+}

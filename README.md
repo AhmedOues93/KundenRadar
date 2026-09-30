@@ -1,0 +1,292 @@
+# KundenRadar
+
+Interne Web-Anwendung für Webagenturen: potenzielle Neukunden erfassen, deren
+Websites technisch analysieren, interessante Firmen qualifizieren und den
+Akquise-Prozess bis zum gewonnenen Kunden verfolgen.
+
+Dieses Repository enthält **Phase 1**: eine lauffähige, mandantenfähige Basis mit
+Authentifizierung, Lead-Verwaltung, deterministischer Website-Analyse,
+regelbasierter Bewertung, Agentur-Erkennung und Akquise-Pipeline.
+
+---
+
+## Tech Stack
+
+| Bereich       | Wahl                                              |
+| ------------- | ------------------------------------------------- |
+| Framework     | Next.js 15 (App Router), React 19                 |
+| Sprache       | TypeScript (strict, `noUncheckedIndexedAccess`)   |
+| Datenbank     | Supabase / PostgreSQL mit Row Level Security      |
+| Auth          | Supabase Auth (E-Mail + Passwort, Cookie-Session) |
+| Styling       | Tailwind CSS v4                                   |
+| Validierung   | Zod                                               |
+| Tests         | Vitest                                            |
+
+Keine kostenpflichtige AI- oder externe Analyse-API. Alle Kernfunktionen sind
+deterministisch: dieselbe Website ergibt denselben Score.
+
+---
+
+## Einrichtung
+
+```bash
+npm install
+cp .env.example .env.local   # Werte eintragen
+npm run dev
+```
+
+Die App startet und baut auch **ohne** Supabase-Zugangsdaten – die geschützten
+Seiten zeigen dann einen Einrichtungshinweis statt eines Fehlers.
+
+### Supabase vorbereiten
+
+1. Projekt auf [supabase.com](https://supabase.com) anlegen.
+2. Migrationen der Reihe nach im SQL-Editor ausführen:
+   - `supabase/migrations/0001_init.sql` – Tabellen, Enums, Trigger
+   - `supabase/migrations/0002_rls.sql` – Row Level Security
+   - `supabase/migrations/0003_bootstrap_organization.sql` – Onboarding-Funktion
+3. `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
+   `.env.local` eintragen.
+4. Konto über `/login?registrieren=1` anlegen, danach unter `/onboarding` die
+   Organisation erstellen.
+
+Der `SUPABASE_SERVICE_ROLE_KEY` ist in Phase 1 **nicht erforderlich**. Er wird
+nur serverseitig gelesen (`src/lib/supabase/admin.ts` ist mit `server-only`
+markiert) und gelangt nie in den Browser.
+
+### Skripte
+
+```bash
+npm run dev        # Entwicklungsserver
+npm run build      # Produktionsbuild
+npm run typecheck  # tsc --noEmit
+npm run lint       # ESLint
+npm run test       # Vitest
+```
+
+---
+
+## Architektur
+
+```
+src/
+  app/
+    (app)/            geschützte Routen: Dashboard, Leads, Analysen, Pipeline, Einstellungen
+    login/            Anmeldung und Registrierung
+    onboarding/       erste Organisation anlegen
+  components/         UI-Primitive und fachliche Komponenten
+  lib/
+    analysis/         Website-Analyse (Kern von Phase 1)
+      url-guard.ts    SSRF-Schutz: Normalisierung, IP-/Hostname-Prüfung, DNS
+      fetcher.ts      HTTP mit Limits, manuellen Redirects und Revalidierung
+      html.ts         HTML-Auslesen ohne DOM-Abhängigkeit
+      metrics.ts      Messwerte aus HTML (rein, ohne Netzwerk)
+      agency.ts       Agentur-Erkennung V1
+      score.ts        regelbasierte Bewertung
+      run.ts          Orchestrierung
+    actions/          Server Actions (Auth, Leads, Analyse)
+    queries.ts        Lesezugriffe für Server-Komponenten
+    auth.ts           Session- und Organisationskontext
+  middleware.ts       Session-Refresh und Routenschutz
+supabase/migrations/  versionierte SQL-Migrationen
+tests/                Vitest-Suiten
+```
+
+**Server/Client-Trennung:** Datenzugriff, Analyse und Mutationen laufen
+ausschliesslich serverseitig (Server-Komponenten und Server Actions).
+Client-Komponenten kümmern sich nur um Interaktion – Formularzustand, Drag &
+Drop, aufklappbare Navigation.
+
+---
+
+## Mandantenfähigkeit
+
+Das Datenmodell ist von Anfang an auf mehrere Agenturen ausgelegt:
+
+```
+organizations ──┬── organization_members ── auth.users / profiles
+                ├── leads ──┬── website_analyses
+                │           ├── lead_notes
+                │           └── lead_activities
+                └── website_analyses (auch ohne Lead-Bezug)
+```
+
+Jeder fachliche Datensatz trägt eine `organization_id`. Rollen: `OWNER`,
+`ADMIN`, `MEMBER`.
+
+Die RLS-Policies setzen auf zwei `SECURITY DEFINER`-Funktionen auf,
+`is_org_member(uuid)` und `is_org_admin(uuid)`, damit die Policy auf
+`organization_members` nicht rekursiv wird. Jeder Zugriff ist auf
+Organisationen begrenzt, in denen der Nutzer Mitglied ist. Zusätzlich filtert
+jede Query im Anwendungscode noch einmal auf `organization_id` – Defense in
+Depth, falls eine Policy einmal zu weit gefasst wird.
+
+---
+
+## Website-Analyse V1
+
+Ein Benutzer gibt eine öffentliche URL an; die Analyse läuft serverseitig.
+Geprüft wird:
+
+- **Technik** – HTTP-Status, HTTPS, Weiterleitungskette, Antwortzeit,
+  CMS-/Generator-Hinweise
+- **SEO** – Titel, Meta-Description, Canonical, robots.txt, sitemap.xml,
+  Open Graph, strukturierte Daten (JSON-LD, Microdata, RDFa)
+- **Mobile** – Viewport-Meta-Tag
+- **Barrierefreiheit** – `lang`-Attribut, Bilder ohne `alt`
+- **Content/Struktur** – H1, interne/externe Links, Stichprobe auf nicht
+  erreichbare Links, auffällig grosse Bilddateien, HTML-Umfang
+- **Agenturhinweise** – siehe unten
+
+### Kein Crawler
+
+Es wird die Startseite geladen, dazu `robots.txt` und `sitemap.xml`, sowie eine
+begrenzte Stichprobe von Links und Bildern per `HEAD`. Alle Grenzen stehen an
+einer Stelle in `LIMITS` (`src/lib/analysis/fetcher.ts`) und sind unter
+*Einstellungen* in der App sichtbar:
+
+| Grenze                  | Wert    |
+| ----------------------- | ------- |
+| Timeout pro Anfrage     | 8 s     |
+| Gesamtbudget je Analyse | 25 s    |
+| Weiterleitungen         | max. 5  |
+| Gelesenes HTML          | 1,5 MB  |
+| Geprüfte Links          | max. 8  |
+| Geprüfte Bilder         | max. 8  |
+
+Der Response-Body wird streamend gelesen und bei Erreichen der Grenze
+abgebrochen, damit eine sehr grosse Seite den Server nicht belastet.
+
+---
+
+## Sicherheit: SSRF-Schutz
+
+Benutzer geben URLs ein, die der Server abruft. `src/lib/analysis/url-guard.ts`
+prüft **vor jedem einzelnen Request** – auch nach jeder Weiterleitung:
+
+- nur `http:`/`https:`, keine eingebetteten Zugangsdaten, nur freigegebene Ports
+- `localhost`, `*.local`, `*.internal`, `*.intranet`, `*.lan`, `*.svc`,
+  `*.cluster.local`, punktlose Hostnamen sowie bekannte Metadata-Namen
+  (`metadata.google.internal`, `instance-data`, …) werden abgewiesen
+- **IPv4:** `0/8`, `10/8`, `127/8`, `169.254/16` (Cloud-Metadata), `172.16/12`,
+  `192.168/16`, `100.64/10` (CGNAT), Test- und Benchmark-Netze, Multicast
+- **IPv6:** `::`, `::1`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `100::/64`,
+  `2001:db8::/32`, `2002::/16`, NAT64, ORCHID sowie IPv4-mapped Adressen
+  (`::ffff:127.0.0.1`) über die eingebettete v4-Adresse
+- Hostnamen werden per DNS aufgelöst; **sobald eine** der zurückgegebenen
+  Adressen intern ist, wird abgebrochen (schützt gegen DNS-Rebinding)
+
+Redirects werden mit `redirect: "manual"` selbst verfolgt und jede Ziel-URL
+erneut vollständig validiert – der klassische Angriffspfad „öffentliche URL,
+die auf `169.254.169.254` weiterleitet" ist damit geschlossen.
+
+`assertPublicUrl` nimmt einen austauschbaren Resolver, wodurch der Schutz ohne
+Netzwerkzugriff testbar ist (`tests/url-guard.test.ts`).
+
+---
+
+## Bewertung (Website-Score)
+
+Der Score ist **regelbasiert und transparent** – keine AI, kein Zufall.
+Er beantwortet ausschliesslich:
+
+> Wie interessant erscheint diese Website für eine **manuelle
+> Akquise-Prüfung**?
+
+Er ist **keine** Aussage darüber, ob die Firma Kunde wird.
+
+| Bereich | Einordnung                      |
+| ------- | ------------------------------- |
+| 0–29    | Geringes technisches Potenzial  |
+| 30–59   | Prüfen                          |
+| 60–79   | Interessant                     |
+| 80–100  | Hohes Analysepotenzial          |
+
+Punkte entstehen nur aus benannten technischen Feststellungen, etwa fehlender
+Titel (+10), fehlendes HTTPS (+14), fehlender Viewport (+12), fehlende Sitemap
+(+6). Alle Gewichte stehen in `SCORE_WEIGHTS` (`src/lib/analysis/score.ts`) und
+sind in der App unter *Einstellungen* aufgelistet. Die Summe wird auf 100
+begrenzt; die Detailseite zeigt jedes Finding mit seinem Punktbeitrag und die
+Summenbildung.
+
+Jedes Finding wird für den Vertrieb aufbereitet, nicht als Rohdaten:
+
+> **Titel fehlt** · Problem
+> *Bedeutung:* Die Seite besitzt keinen aussagekräftigen Seitentitel.
+> *Akquise-Relevanz:* Kann ein sinnvoller Gesprächspunkt bei einer
+> Website-Optimierung sein.
+
+Bewusst vermieden werden nicht belegbare Aussagen wie „Sie verlieren Kunden".
+
+---
+
+## Agentur-Erkennung V1
+
+Kontrolliert durchsucht werden Footer-, Credit- und Impressum-Bereiche sowie
+externe Links – nach Formulierungen wie *Website by*, *Designed by*,
+*Realisiert durch*, *Umsetzung*, und nach Begriffen wie *Webdesign*,
+*Webentwicklung*, *Agentur*.
+
+Gespeichert werden `has_agency`, `detected_agency_name`, `evidence` (wörtlicher
+Textausschnitt), `source_url` und die Fundstelle.
+
+Plattform-Credits (WordPress, Wix, Jimdo, Shopify …) und typische Falschtreffer
+(*Agentur für Arbeit*, *Versicherungsagentur* …) werden ausgefiltert.
+
+Die Oberfläche formuliert immer **„Agenturhinweis gefunden"** – nie „hat bereits
+eine Agentur". Ein Hinweis belegt keine laufende Zusammenarbeit, und ein
+fehlender Hinweis belegt nicht deren Abwesenheit. Agenturhinweise gehen mit
+**0 Punkten** in den Score ein: die Bewertung bleibt rein technisch.
+
+---
+
+## Seiten
+
+| Route            | Inhalt                                                        |
+| ---------------- | ------------------------------------------------------------- |
+| `/dashboard`     | 8 KPIs, neueste Leads, Hinweis zur Bewertung                  |
+| `/leads`         | Suche, Filter nach Status/Ort/Branche, Sortierung, Tabelle     |
+| `/leads/neu`     | Lead manuell erfassen                                         |
+| `/leads/[id]`    | Firma, Kontakt, Analyse, Agenturhinweis, Notizen, Aktivitäten |
+| `/analysen`      | alle Analysen der Organisation                                |
+| `/analysen/[id]` | Findings nach Gruppen, Score-Herkunft, Messwerte              |
+| `/pipeline`      | Akquise-Board mit Drag & Drop                                 |
+| `/einstellungen` | Organisation, Team, Bewertungsregeln, Analyse-Grenzen         |
+
+Die Filterleiste ist ein reines GET-Formular: die Auswahl steht in der URL, ist
+teilbar und funktioniert ohne JavaScript. Die Pipeline nutzt die native
+HTML5-Drag-&-Drop-API (keine zusätzliche Abhängigkeit) und bietet auf jeder
+Karte zusätzlich ein Auswahlfeld – so ist der Statuswechsel auch per Tastatur
+und auf Touch-Geräten möglich.
+
+Desktop und Mobile sind durchgehend berücksichtigt: Seitennavigation wird auf
+kleinen Bildschirmen zum ausklappbaren Menü, die Lead-Tabelle zur Kartenliste.
+
+---
+
+## Tests
+
+```bash
+npm run test
+```
+
+72 Tests in vier Suiten, mit Schwerpunkt auf den sicherheits- und
+korrektheitskritischen Teilen:
+
+- `tests/url-guard.test.ts` – SSRF-Schutz: Protokolle, Ports, Hostnamen,
+  IPv4-/IPv6-Bereiche, Cloud-Metadata, DNS-Rebinding
+- `tests/metrics.test.ts` – HTML-Auslesen, Link- und Bildzählung, CMS-Erkennung
+- `tests/score.test.ts` – jede Bewertungsregel, Obergrenzen, Bänder,
+  Reproduzierbarkeit
+- `tests/agency.test.ts` – Credit-Muster, Link-Erkennung, Falschtreffer
+
+---
+
+## Bewusst nicht in Phase 1
+
+Damit die Basis sauber bleibt, ist Folgendes vorbereitet, aber nicht
+angefangen: automatische Lead-Recherche und Importquellen, Einladungen per
+E-Mail und Rollenverwaltung in der Oberfläche, Analyse-Historie mit
+Zeitverlauf, E-Mail-Sequenzen, Abrechnung und Mandanten-Onboarding als
+Self-Service. Das Datenmodell (Organisationen, Rollen, Aktivitäts-Log)
+unterstützt diese Schritte bereits.
