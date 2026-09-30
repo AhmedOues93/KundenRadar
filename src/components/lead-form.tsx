@@ -54,6 +54,10 @@ export function LeadForm({ lead }: { lead?: Lead }) {
           />
         </Field>
 
+        <Field label="Strasse und Hausnummer" hint={state.errors?.street} className="sm:col-span-2">
+          <Input name="street" maxLength={200} defaultValue={lead?.street ?? ""} />
+        </Field>
+
         <Field label="Postleitzahl" hint={state.errors?.postal_code}>
           <Input name="postal_code" maxLength={20} defaultValue={lead?.postal_code ?? ""} />
         </Field>

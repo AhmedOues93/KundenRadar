@@ -21,6 +21,7 @@ export type LeadStatus = (typeof LEAD_STATUSES)[number];
 export const LEAD_SOURCES = [
   "MANUAL",
   "IMPORT",
+  "DISCOVERY",
   "REFERRAL",
   "INBOUND",
   "RESEARCH",
@@ -130,8 +131,12 @@ export type Lead = {
   company_name: string;
   website_url: string | null;
   domain: string | null;
+  street: string | null;
   city: string | null;
   postal_code: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
   industry: string | null;
   email: string | null;
   phone: string | null;

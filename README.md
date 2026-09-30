@@ -4,9 +4,14 @@ Interne Web-Anwendung für Webagenturen: potenzielle Neukunden erfassen, deren
 Websites technisch analysieren, interessante Firmen qualifizieren und den
 Akquise-Prozess bis zum gewonnenen Kunden verfolgen.
 
-Dieses Repository enthält **Phase 1**: eine lauffähige, mandantenfähige Basis mit
-Authentifizierung, Lead-Verwaltung, deterministischer Website-Analyse,
-regelbasierter Bewertung, Agentur-Erkennung und Akquise-Pipeline.
+Enthalten sind:
+
+* **Phase 1** – mandantenfähige Basis mit Authentifizierung, Lead-Verwaltung,
+  deterministischer Website-Analyse, regelbasierter Bewertung,
+  Agentur-Erkennung und Akquise-Pipeline.
+* **Phase 2** – automatische Lead-Suche nach Region und Branche über
+  OpenStreetMap, Duplikaterkennung, Auswahl und Import, kontrollierte
+  Stapel-Analyse und eine Qualifizierungsansicht.
 
 ---
 
@@ -45,6 +50,7 @@ Seiten zeigen dann einen Einrichtungshinweis statt eines Fehlers.
    - `supabase/migrations/0001_init.sql` – Tabellen, Enums, Trigger
    - `supabase/migrations/0002_rls.sql` – Row Level Security
    - `supabase/migrations/0003_bootstrap_organization.sql` – Onboarding-Funktion
+   - `supabase/migrations/0004_discovery.sql` – Lead-Suche (Phase 2)
 3. `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
    `.env.local` eintragen.
 4. Konto über `/login?registrieren=1` anlegen, danach unter `/onboarding` die
@@ -76,7 +82,17 @@ src/
     onboarding/       erste Organisation anlegen
   components/         UI-Primitive und fachliche Komponenten
   lib/
+    discovery/        Lead-Suche (Kern von Phase 2)
+      types.ts        Provider-Abstraktion `LeadDiscoveryProvider`
+      industries.ts   Branchenkatalog mit OSM-Abbildung
+      osm-mapping.ts  Overpass-Abfrage und Element-Abbildung (rein)
+      overpass-provider.ts  OpenStreetMap-Quelle, Transport injizierbar
+      registry.ts     Registry der verfügbaren Datenquellen
+      dedupe.ts       Duplikaterkennung (rein)
+      import.ts       Importplanung und Lead-Abbildung (rein)
+      queries.ts      Lesezugriffe auf Läufe und Treffer
     analysis/         Website-Analyse (Kern von Phase 1)
+      batch.ts        kontrollierte Stapel-Analyse
       url-guard.ts    SSRF-Schutz: Normalisierung, IP-/Hostname-Prüfung, DNS
       fetcher.ts      HTTP mit Limits, manuellen Redirects und Revalidierung
       html.ts         HTML-Auslesen ohne DOM-Abhängigkeit
@@ -108,7 +124,9 @@ organizations ──┬── organization_members ── auth.users / profiles
                 ├── leads ──┬── website_analyses
                 │           ├── lead_notes
                 │           └── lead_activities
-                └── website_analyses (auch ohne Lead-Bezug)
+                ├── website_analyses (auch ohne Lead-Bezug)
+                ├── lead_discovery_runs ── lead_discovery_candidates
+                └── lead_source_metadata (Herkunft eines Leads)
 ```
 
 Jeder fachliche Datensatz trägt eine `organization_id`. Rollen: `OWNER`,
@@ -156,6 +174,119 @@ einer Stelle in `LIMITS` (`src/lib/analysis/fetcher.ts`) und sind unter
 
 Der Response-Body wird streamend gelesen und bei Erreichen der Grenze
 abgebrochen, damit eine sehr grosse Seite den Server nicht belastet.
+
+---
+
+## Lead-Suche (Phase 2)
+
+Unter `/leads/discover` sucht der Benutzer Firmen nach **Ort, Radius, Branche**
+und maximaler Trefferzahl.
+
+### Datenquelle
+
+Erste Quelle ist **OpenStreetMap**: Ortsauflösung über Nominatim, Firmensuche
+über die Overpass-API. Beides ist öffentlich und legal nutzbar (ODbL 1.0). Es
+findet **kein Scraping von Google Maps oder LinkedIn** statt.
+
+Pro Suche gibt es genau eine Geocoding- und eine Overpass-Anfrage, mit
+aussagekräftigem User-Agent, hartem Timeout und begrenzter Trefferzahl – so
+bleiben die Nutzungsbedingungen der Dienste gewahrt. HTTP 429 und 504 werden in
+verständliche Meldungen übersetzt („Rate Limit", „Radius verkleinern").
+
+### Austauschbare Quellen
+
+Die Anwendung hängt nicht an einer einzelnen Quelle. Jede Quelle implementiert
+`LeadDiscoveryProvider`:
+
+```ts
+interface LeadDiscoveryProvider {
+  readonly id: DiscoveryProviderId;
+  readonly label: string;
+  readonly attribution: string;
+  search(query: DiscoveryQuery, signal?: AbortSignal): Promise<DiscoveryResult>;
+}
+```
+
+Alles danach – Duplikatabgleich, Auswahl, Import, Analyse, Qualifizierung –
+arbeitet nur mit `DiscoveryCandidate` und ist quellenunabhängig. Eine weitere
+Quelle wird in `src/lib/discovery/registry.ts` eingehängt. Der Transport des
+Overpass-Providers ist injizierbar, wodurch er ohne Netzwerk testbar ist.
+
+Der Branchenkatalog (`industries.ts`) bringt seine OSM-Abbildung selbst mit –
+Handwerk, Elektriker, Sanitär, Dachdecker, Maler, Tischler, Restaurants, Hotels,
+Ärzte, Zahnärzte, Immobilien, Pflege, Rechtsanwälte, Steuerberater, Kfz,
+Friseure. Keys und Werte der Abfrage stammen ausschliesslich aus dem Katalog im
+Code und werden vor dem Einsetzen strikt validiert – eine Overpass-Abfrage ist
+daher nicht über Benutzereingaben manipulierbar.
+
+### Duplikaterkennung
+
+Zwei Wege, beide rein und getestet:
+
+1. **Domain** – normalisiert (Kleinschreibung, ohne `www.`, ohne Pfad).
+2. **Firmenname + Adresse** – für Firmen ohne Website. Rechtsformen (`GmbH`,
+   `GmbH & Co. KG`, `e.K.`, …) und Umlaute werden vor dem Vergleich
+   vereinheitlicht, Strassenkürzel (`Hauptstraße` / `Hauptstr.` /
+   `Hauptstrasse`) zusammengeführt.
+
+Zusätzlich werden Dubletten **innerhalb** einer Ergebnisliste erkannt (dieselbe
+Firma als Node und als Way). Jeder Treffer trägt seinen Status: `NEW`,
+`DUPLICATE_DOMAIN`, `DUPLICATE_NAME_ADDRESS` oder `DUPLICATE_IN_RESULT`. Firmen
+ohne Website sind separat gekennzeichnet.
+
+Unmittelbar vor dem Schreiben wird erneut abgeglichen (`planImport`) – zwischen
+Suche und Import können Leads entstanden sein, etwa durch einen zweiten
+Benutzer. Bereits vorhandene Firmen werden nicht doppelt gespeichert.
+
+### Auswahl vor Import
+
+Es wird nichts automatisch gespeichert. Der Benutzer sieht zuerst die
+Trefferliste und kann einzeln, mehrfach oder „alle sinnvollen Treffer" wählen
+(neu, mit Website, noch nicht importiert) und dann importieren.
+
+### Stapel-Analyse
+
+Nach dem Import werden ausgewählte Leads in `/qualifizierung` analysiert. Dafür
+wird die **bestehende Analyse aus Phase 1 unverändert** verwendet – es gibt
+keine zweite Analyse-Engine und damit auch keinen zweiten SSRF-Schutz, der
+abweichen könnte.
+
+| Eigenschaft            | Wert                        |
+| ---------------------- | --------------------------- |
+| Parallelität           | 2 gleichzeitige Analysen    |
+| Mindestabstand         | 350 ms zwischen Starts      |
+| Leads pro Durchlauf    | max. 25                     |
+| Zeitbudget je Stapel   | 240 s                       |
+
+Ein Fehler bei einem Lead stoppt den Stapel nicht: er wird dem Element
+zugeordnet und als Analyse mit Status `FAILED` gespeichert, damit er in der
+Qualifizierung sichtbar bleibt. Auch ein Fehler beim Speichern oder eine
+geworfene Ausnahme brechen den Durchlauf nicht ab. Ist das Zeitbudget
+erschöpft, werden die restlichen Elemente als übersprungen gemeldet statt den
+Aufruf hängen zu lassen.
+
+### Qualifizierung
+
+`/qualifizierung` zeigt Firma, Website, Ort, Branche, Potenzial-Score, die
+wichtigsten Findings, den Agenturhinweis und den Analyse-Status – standardmässig
+nach höchstem Potenzial sortiert. Filter: hoher Score, kein Agenturhinweis,
+Agenturhinweis vorhanden, noch nicht analysiert, Analyse fehlgeschlagen, Branche
+und Ort.
+
+### Vollständiger Ablauf
+
+```
+Ort + Radius + Branche
+  → Firmen suchen          (/leads/discover)
+  → Treffer prüfen         Duplikate und Firmen ohne Website markiert
+  → Firmen auswählen
+  → Leads importieren
+  → Websites analysieren   (/qualifizierung, Stapel)
+  → Score berechnen        Phase-1-Bewertung, unverändert
+  → nach Potenzial sortiert
+  → Lead öffnen            (/leads/[id])
+  → in die Pipeline        (/pipeline)
+```
 
 ---
 
@@ -227,6 +358,12 @@ externe Links – nach Formulierungen wie *Website by*, *Designed by*,
 *Realisiert durch*, *Umsetzung*, und nach Begriffen wie *Webdesign*,
 *Webentwicklung*, *Agentur*.
 
+Findet die Startseite keinen Hinweis, wird zusätzlich die **Impressum-Seite**
+geprüft: genau eine weitere Anfrage über denselben SSRF-geschützten Fetch, die
+Adresse wird aus den internen Links abgeleitet (`/impressum`, `/imprint`,
+`/legal-notice`, …). Die Analyse bleibt damit kein Crawler. Stammt der Hinweis
+von dort, ist die Fundstelle als `impressum/…` gekennzeichnet.
+
 Gespeichert werden `has_agency`, `detected_agency_name`, `evidence` (wörtlicher
 Textausschnitt), `source_url` und die Fundstelle.
 
@@ -244,7 +381,9 @@ fehlender Hinweis belegt nicht deren Abwesenheit. Agenturhinweise gehen mit
 
 | Route            | Inhalt                                                        |
 | ---------------- | ------------------------------------------------------------- |
-| `/dashboard`     | 8 KPIs, neueste Leads, Hinweis zur Bewertung                  |
+| `/dashboard`     | KPIs, neueste Leads, letzte Lead-Suche, Hinweis zur Bewertung  |
+| `/leads/discover`| Lead-Suche, Trefferliste, Auswahl und Import                   |
+| `/qualifizierung`| Leads nach Potenzial, Filter, Stapel-Analyse                  |
 | `/leads`         | Suche, Filter nach Status/Ort/Branche, Sortierung, Tabelle     |
 | `/leads/neu`     | Lead manuell erfassen                                         |
 | `/leads/[id]`    | Firma, Kontakt, Analyse, Agenturhinweis, Notizen, Aktivitäten |
@@ -270,23 +409,44 @@ kleinen Bildschirmen zum ausklappbaren Menü, die Lead-Tabelle zur Kartenliste.
 npm run test
 ```
 
-72 Tests in vier Suiten, mit Schwerpunkt auf den sicherheits- und
-korrektheitskritischen Teilen:
+184 Tests in zehn Suiten, mit Schwerpunkt auf den sicherheits- und
+korrektheitskritischen Teilen.
+
+Phase 1:
 
 - `tests/url-guard.test.ts` – SSRF-Schutz: Protokolle, Ports, Hostnamen,
   IPv4-/IPv6-Bereiche, Cloud-Metadata, DNS-Rebinding
 - `tests/metrics.test.ts` – HTML-Auslesen, Link- und Bildzählung, CMS-Erkennung
 - `tests/score.test.ts` – jede Bewertungsregel, Obergrenzen, Bänder,
   Reproduzierbarkeit
-- `tests/agency.test.ts` – Credit-Muster, Link-Erkennung, Falschtreffer
+- `tests/agency.test.ts` – Credit-Muster, Link-Erkennung, Falschtreffer,
+  Impressum-Erkennung
+
+Phase 2:
+
+- `tests/discovery-mapping.test.ts` – Branchenkatalog, Overpass-Abfragebau
+  (inklusive abgewiesener Manipulationsversuche), Abbildung der OSM-Elemente
+- `tests/discovery-dedupe.test.ts` – Normalisierung von Domain, Firmenname und
+  Adresse, alle Duplikatfälle, Lead-Abbildung
+- `tests/discovery-import.test.ts` – Importplanung: was angelegt und was als
+  Duplikat übersprungen wird
+- `tests/discovery-provider.test.ts` – Provider mit injiziertem Transport:
+  Erfolg, Grenzen, Rate Limit, Timeout, defektes JSON, Abbruch, User-Agent
+- `tests/discovery-filters.test.ts` – Filter der Trefferliste, Beschriftungen,
+  Suchparameter, Auswahl des besseren Agenturhinweises
+- `tests/analysis-batch.test.ts` – Stapel-Analyse: Reihenfolge, Parallelität,
+  Mindestabstand, Fehlerisolierung, Zeitbudget
 
 ---
 
-## Bewusst nicht in Phase 1
+## Bewusst noch nicht umgesetzt
 
 Damit die Basis sauber bleibt, ist Folgendes vorbereitet, aber nicht
-angefangen: automatische Lead-Recherche und Importquellen, Einladungen per
-E-Mail und Rollenverwaltung in der Oberfläche, Analyse-Historie mit
-Zeitverlauf, E-Mail-Sequenzen, Abrechnung und Mandanten-Onboarding als
-Self-Service. Das Datenmodell (Organisationen, Rollen, Aktivitäts-Log)
-unterstützt diese Schritte bereits.
+angefangen: weitere Datenquellen neben OpenStreetMap (die Abstraktion steht),
+Einladungen per E-Mail und Rollenverwaltung in der Oberfläche, Analyse-Historie
+mit Zeitverlauf, E-Mail-Sequenzen, Abrechnung und Mandanten-Onboarding als
+Self-Service. Das Datenmodell (Organisationen, Rollen, Aktivitäts-Log,
+Herkunftsdaten) unterstützt diese Schritte bereits.
+
+Ebenfalls keine AI: Suche, Analyse und Bewertung arbeiten vollständig
+deterministisch, ohne Claude-, OpenAI- oder vergleichbare API.

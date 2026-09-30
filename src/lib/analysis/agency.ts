@@ -113,7 +113,7 @@ export function detectAgencyHint(input: AgencyDetectionInput): AgencyHint {
       return {
         found: true,
         agencyName: candidate,
-        evidence: `${label}: ${clip(match[0])}`,
+        evidence: formatEvidence(label, match[0]),
         sourceUrl: input.pageUrl,
         location: area.location,
       };
@@ -256,9 +256,56 @@ function extractSurrounding(text: string, term: string): string {
   return text.slice(start, start + MAX_EVIDENCE_LENGTH);
 }
 
+/**
+ * Nachweis aufbereiten. Das Label wird nur vorangestellt, wenn der gefundene
+ * Text es nicht schon selbst enthält – sonst stünde es doppelt da.
+ */
+function formatEvidence(label: string, matched: string): string {
+  const text = clip(matched);
+  const firstWord = label.split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (firstWord && text.toLowerCase().startsWith(firstWord)) return text;
+  return clip(`${label}: ${text}`);
+}
+
 function clip(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > MAX_EVIDENCE_LENGTH
     ? `${normalized.slice(0, MAX_EVIDENCE_LENGTH - 1)}…`
     : normalized;
+}
+
+/**
+ * Sucht unter den internen Links die Impressum-Seite.
+ *
+ * Nur Pfad-Heuristik, keine zusätzliche Anfrage: der Aufrufer entscheidet, ob
+ * die gefundene Adresse wirklich geladen wird.
+ */
+const IMPRINT_PATH_PATTERN =
+  /(^|\/)(impressum|imprint|legal[-_]?notice|anbieterkennzeichnung|kontakt-impressum)(\/|\.|$)/i;
+
+export function findImprintUrl(internalLinks: string[]): string | null {
+  for (const link of internalLinks) {
+    try {
+      const url = new URL(link);
+      if (IMPRINT_PATH_PATTERN.test(url.pathname)) return url.toString();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Wählt den aussagekräftigeren von zwei Hinweisen aus. Ein Hinweis mit Namen
+ * gewinnt gegen einen ohne, und ein Treffer gewinnt gegen „nichts gefunden".
+ */
+export function preferAgencyHint(
+  primary: AgencyHint | null,
+  secondary: AgencyHint | null,
+): AgencyHint | null {
+  if (!primary?.found && secondary?.found) return secondary;
+  if (primary?.found && secondary?.found && !primary.agencyName && secondary.agencyName) {
+    return secondary;
+  }
+  return primary ?? secondary;
 }

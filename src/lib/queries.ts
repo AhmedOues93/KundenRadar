@@ -203,3 +203,137 @@ export async function loadAnalysis(
 function escapeLike(value: string): string {
   return value.replace(/[%_\\,]/g, (match) => `\\${match}`);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Qualifizierung (Phase 2)                                                   */
+/* -------------------------------------------------------------------------- */
+
+export type QualificationFilters = {
+  score?: "HIGH" | "ANY";
+  agency?: "FOUND" | "NONE" | "ANY";
+  analysis?: "DONE" | "MISSING" | "FAILED" | "ANY";
+  industry?: string;
+  city?: string;
+  search?: string;
+};
+
+export type QualificationRow = {
+  lead: Lead;
+  /** Jüngste Analyse des Leads, falls vorhanden. */
+  analysis: Pick<
+    WebsiteAnalysis,
+    "id" | "status" | "score" | "findings" | "error_message" | "created_at"
+  > | null;
+};
+
+/**
+ * Leads mit ihrer jüngsten Analyse, standardmässig nach höchstem
+ * Analysepotenzial sortiert.
+ *
+ * Die Analysen werden in einem zweiten Zugriff über `last_analysis_id` geholt –
+ * das bleibt nachvollziehbar und unabhängig von Join-Namen in Supabase.
+ */
+export async function loadQualificationRows(
+  organizationId: string,
+  filters: QualificationFilters,
+): Promise<QualificationRow[]> {
+  const supabase = await createServerSupabase();
+
+  let query = supabase
+    .from("leads")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .neq("status", "ARCHIVED");
+
+  if (filters.industry) query = query.ilike("industry", `%${escapeLike(filters.industry)}%`);
+  if (filters.city) query = query.ilike("city", `%${escapeLike(filters.city)}%`);
+  if (filters.search) {
+    const term = `%${escapeLike(filters.search)}%`;
+    query = query.or([`company_name.ilike.${term}`, `domain.ilike.${term}`].join(","));
+  }
+
+  if (filters.score === "HIGH") {
+    query = query.gte("potential_score", INTERESTING_SCORE_THRESHOLD);
+  }
+  if (filters.agency === "FOUND") query = query.eq("has_agency", true);
+  if (filters.agency === "NONE") query = query.eq("has_agency", false);
+  if (filters.analysis === "MISSING") query = query.is("last_analysis_id", null);
+  if (filters.analysis === "DONE" || filters.analysis === "FAILED") {
+    query = query.not("last_analysis_id", "is", null);
+  }
+
+  const { data, error } = await query
+    .order("potential_score", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  if (error) throw new Error(`Leads konnten nicht geladen werden: ${error.message}`);
+
+  const leads = (data ?? []) as Lead[];
+  const analysisIds = leads
+    .map((lead) => lead.last_analysis_id)
+    .filter((id): id is string => Boolean(id));
+
+  const analysisById = new Map<string, QualificationRow["analysis"]>();
+  if (analysisIds.length > 0) {
+    const { data: analyses } = await supabase
+      .from("website_analyses")
+      .select("id, status, score, findings, error_message, created_at")
+      .eq("organization_id", organizationId)
+      .in("id", analysisIds);
+
+    for (const row of analyses ?? []) {
+      analysisById.set(row.id as string, row as QualificationRow["analysis"]);
+    }
+  }
+
+  const rows: QualificationRow[] = leads.map((lead) => ({
+    lead,
+    analysis: lead.last_analysis_id ? analysisById.get(lead.last_analysis_id) ?? null : null,
+  }));
+
+  // Der Analysestatus steckt in der Analyse, nicht im Lead – deshalb wird hier
+  // nachgefiltert.
+  if (filters.analysis === "FAILED") {
+    return rows.filter(
+      (row) => row.analysis?.status === "FAILED" || row.analysis?.status === "BLOCKED",
+    );
+  }
+  if (filters.analysis === "DONE") {
+    return rows.filter((row) => row.analysis?.status === "SUCCESS");
+  }
+
+  return rows;
+}
+
+/** Kennzahlen für das Dashboard, die aus Phase 2 hinzukommen. */
+export async function loadDiscoveryStats(organizationId: string): Promise<{
+  fromDiscovery: number;
+  notAnalyzed: number;
+  highPotential: number;
+  agencyHints: number;
+}> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("source, last_analysis_id, potential_score, has_agency, status")
+    .eq("organization_id", organizationId)
+    .neq("status", "ARCHIVED")
+    .limit(5000);
+
+  if (error) throw new Error(`Kennzahlen konnten nicht geladen werden: ${error.message}`);
+
+  let fromDiscovery = 0;
+  let notAnalyzed = 0;
+  let highPotential = 0;
+  let agencyHints = 0;
+
+  for (const row of data ?? []) {
+    if (row.source === "DISCOVERY") fromDiscovery += 1;
+    if (!row.last_analysis_id) notAnalyzed += 1;
+    if ((row.potential_score ?? 0) >= INTERESTING_SCORE_THRESHOLD) highPotential += 1;
+    if (row.has_agency) agencyHints += 1;
+  }
+
+  return { fromDiscovery, notAnalyzed, highPotential, agencyHints };
+}

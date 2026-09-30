@@ -140,3 +140,16 @@ describe("extractFooterLikeRegions", () => {
     expect(regions).not.toContain("Böse");
   });
 });
+
+describe("detectAgencyHint – Nachweis", () => {
+  it("stellt das Label nicht doppelt voran", () => {
+    const hint = detect("<footer><span>Umsetzung: Pixelwerk Köln</span></footer>");
+    expect(hint.evidence).toBe("Umsetzung: Pixelwerk Köln");
+  });
+
+  it("ergänzt das Label, wenn der Text es nicht nennt", () => {
+    const hint = detect("<footer><p>Website by Studio Nordlicht</p></footer>");
+    expect(hint.evidence).toContain("Studio Nordlicht");
+    expect(hint.evidence?.match(/Website by/gi)?.length).toBe(1);
+  });
+});

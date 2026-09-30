@@ -9,7 +9,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { LEAD_SOURCES, LEAD_STATUSES, type LeadStatus } from "@/lib/types";
 import { domainFromInput } from "@/lib/analysis/run";
 import { normalizeUrl } from "@/lib/analysis/url-guard";
-import { type ActionState, failed, logActivity, nullable, text } from "./shared";
+import { type ActionState, failed, fieldErrors, logActivity, nullable, text } from "./shared";
 
 const leadSchema = z.object({
   company_name: z
@@ -18,6 +18,7 @@ const leadSchema = z.object({
     .min(2, "Bitte den Firmennamen angeben.")
     .max(200, "Der Firmenname ist zu lang."),
   website_url: z.string().trim().max(2048).optional().nullable(),
+  street: z.string().trim().max(200).optional().nullable(),
   city: z.string().trim().max(120).optional().nullable(),
   postal_code: z.string().trim().max(20).optional().nullable(),
   industry: z.string().trim().max(120).optional().nullable(),
@@ -37,6 +38,7 @@ function readLeadForm(formData: FormData) {
   return leadSchema.safeParse({
     company_name: text(formData.get("company_name")),
     website_url: nullable(formData.get("website_url")),
+    street: nullable(formData.get("street")),
     city: nullable(formData.get("city")),
     postal_code: nullable(formData.get("postal_code")),
     industry: nullable(formData.get("industry")),
@@ -271,6 +273,7 @@ export async function addLeadNote(_prev: ActionState, formData: FormData): Promi
 function toRow(input: LeadInput) {
   return {
     company_name: input.company_name,
+    street: input.street ?? null,
     city: input.city ?? null,
     postal_code: input.postal_code ?? null,
     industry: input.industry ?? null,
@@ -285,13 +288,4 @@ function toRow(input: LeadInput) {
 
 function isLeadStatus(value: string): value is LeadStatus {
   return (LEAD_STATUSES as readonly string[]).includes(value);
-}
-
-function fieldErrors(error: z.ZodError): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const issue of error.issues) {
-    const key = issue.path[0];
-    if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
-  }
-  return errors;
 }

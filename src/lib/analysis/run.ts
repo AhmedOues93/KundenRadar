@@ -1,5 +1,5 @@
-import type { AnalysisMetrics, AnalysisResult } from "@/lib/types";
-import { detectAgencyHint } from "./agency";
+import type { AgencyHint, AnalysisMetrics, AnalysisResult } from "@/lib/types";
+import { detectAgencyHint, findImprintUrl, preferAgencyHint } from "./agency";
 import { FetchFailedError, LIMITS, isBlockedError, probe, safeFetch } from "./fetcher";
 import { extractFromHtml, sitemapFromRobots } from "./metrics";
 import { evaluate } from "./score";
@@ -55,11 +55,21 @@ export async function analyzeWebsite(inputUrl: string): Promise<AnalysisResult> 
     largeImages: imageChecks.large,
   };
 
-  const agencyHint = detectAgencyHint({
+  const startPageHint = detectAgencyHint({
     html: page.body,
     pageUrl: finalUrl,
     ownHost: finalParsed.hostname,
   });
+
+  // Nur wenn auf der Startseite kein Hinweis steht, wird zusätzlich das
+  // Impressum geprüft – eine einzige weitere Anfrage, über denselben
+  // SSRF-geschützten Fetch.
+  const agencyHint = startPageHint.found
+    ? startPageHint
+    : preferAgencyHint(
+        startPageHint,
+        await checkImprint(extraction.links.internal, finalParsed.hostname, budget),
+      );
 
   const { findings, score } = evaluate(metrics, agencyHint);
 
@@ -167,6 +177,37 @@ async function checkImages(
     .map(({ url, result }) => ({ url, bytes: result.bytes as number }));
 
   return { large };
+}
+
+/**
+ * Laedt die Impressum-Seite und sucht dort nach einem Agenturhinweis.
+ * Schlaegt das fehl, ist das kein Fehler der Analyse – es gibt dann einfach
+ * keinen zusaetzlichen Hinweis.
+ */
+async function checkImprint(
+  internalLinks: string[],
+  ownHost: string,
+  signal: AbortSignal,
+): Promise<AgencyHint | null> {
+  if (LIMITS.maxAgencyPages < 1) return null;
+
+  const imprintUrl = findImprintUrl(internalLinks);
+  if (!imprintUrl) return null;
+
+  try {
+    const page = await safeFetch(imprintUrl, { signal, timeoutMs: 6_000 });
+    if (page.status < 200 || page.status >= 300) return null;
+    const hint = detectAgencyHint({
+      html: page.body,
+      pageUrl: page.finalUrl,
+      ownHost,
+    });
+    // Fundstelle kennzeichnen, damit in der UI sichtbar ist, woher der
+    // Hinweis stammt.
+    return hint.found ? { ...hint, location: `impressum/${hint.location ?? "seite"}` } : hint;
+  } catch {
+    return null;
+  }
 }
 
 function failure(

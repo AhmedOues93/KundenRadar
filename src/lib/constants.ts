@@ -40,6 +40,7 @@ export const LEAD_STATUS_TONE: Record<LeadStatus, string> = {
 export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   MANUAL: "Manuell erfasst",
   IMPORT: "Import",
+  DISCOVERY: "Automatische Suche",
   REFERRAL: "Empfehlung",
   INBOUND: "Inbound-Anfrage",
   RESEARCH: "Recherche",

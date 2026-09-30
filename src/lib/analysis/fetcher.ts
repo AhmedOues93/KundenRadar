@@ -17,6 +17,11 @@ export const LIMITS = {
   maxImageChecks: 8,
   /** Ab dieser Groesse gilt ein Bild als auffällig gross (600 kB). */
   largeImageBytes: 600_000,
+  /**
+   * Zusätzliche Unterseiten, die für die Agentur-Erkennung geladen werden
+   * dürfen (Impressum). Bewusst 1 – die Analyse bleibt kein Crawler.
+   */
+  maxAgencyPages: 1,
 } as const;
 
 export const USER_AGENT =

@@ -5,6 +5,8 @@ import { requireSessionContext } from "@/lib/auth";
 import { loadAnalyses, loadLead } from "@/lib/queries";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { LEAD_SOURCE_LABELS } from "@/lib/constants";
+import { loadLeadSource } from "@/lib/discovery/queries";
+import { providerLabel } from "@/lib/discovery/labels";
 import type { LeadActivity, LeadNote } from "@/lib/types";
 import { AgencyBadge, AnalysisStatusBadge, LeadStatusBadge, ScoreBadge } from "@/components/badges";
 import {
@@ -50,8 +52,9 @@ export default async function LeadDetailPage({
   if (!lead) notFound();
 
   const supabase = await createServerSupabase();
-  const [analyses, { data: notes }, { data: activities }] = await Promise.all([
+  const [analyses, leadSource, { data: notes }, { data: activities }] = await Promise.all([
     loadAnalyses(session.organizationId, { leadId: lead.id, limit: 10 }),
+    loadLeadSource(session.organizationId, lead.id),
     supabase
       .from("lead_notes")
       .select("id, lead_id, body, created_by, created_at")
@@ -71,6 +74,7 @@ export default async function LeadDetailPage({
     { label: "Ansprechpartner", value: lead.contact_person },
     { label: "E-Mail", value: lead.email, href: lead.email ? `mailto:${lead.email}` : null },
     { label: "Telefon", value: lead.phone, href: lead.phone ? `tel:${lead.phone}` : null },
+    { label: "Strasse", value: lead.street },
     { label: "Ort", value: [lead.postal_code, lead.city].filter(Boolean).join(" ") || null },
     { label: "Branche", value: lead.industry },
     { label: "Quelle", value: LEAD_SOURCE_LABELS[lead.source] },
@@ -279,6 +283,32 @@ export default async function LeadDetailPage({
               ) : null}
             </CardBody>
           </Card>
+
+          {leadSource ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Herkunft</CardTitle>
+              </CardHeader>
+              <CardBody className="space-y-1 text-sm">
+                <p className="text-slate-700">
+                  Gefunden über {providerLabel(leadSource.provider)}.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Kennung: <span className="font-mono">{leadSource.external_id}</span>
+                </p>
+                {leadSource.source_url ? (
+                  <a
+                    href={leadSource.source_url}
+                    target="_blank"
+                    rel="noreferrer noopener nofollow"
+                    className="text-xs text-slate-600 underline"
+                  >
+                    Datensatz der Quelle öffnen
+                  </a>
+                ) : null}
+              </CardBody>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

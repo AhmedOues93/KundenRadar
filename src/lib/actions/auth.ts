@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { type ActionState, failed, text } from "./shared";
+import { type ActionState, failed, fieldErrors, text } from "./shared";
 
 const credentialsSchema = z.object({
   email: z.string().trim().min(3, "E-Mail fehlt.").email("Bitte eine gültige E-Mail angeben."),
@@ -103,13 +103,4 @@ export async function createOrganization(
 /** Nur relative Pfade zulassen, damit kein Open Redirect entsteht. */
 function isSafeRedirect(target: string): boolean {
   return target.startsWith("/") && !target.startsWith("//");
-}
-
-function fieldErrors(error: z.ZodError): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const issue of error.issues) {
-    const key = issue.path[0];
-    if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
-  }
-  return errors;
 }

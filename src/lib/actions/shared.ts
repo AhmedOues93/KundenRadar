@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { z } from "zod";
 import type { ActivityType } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -51,4 +52,14 @@ export function nullable(value: FormDataEntryValue | null | undefined): string |
 
 export function text(value: FormDataEntryValue | null | undefined): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Zod-Fehler auf Formularfelder abbilden; erster Fehler je Feld gewinnt. */
+export function fieldErrors(error: z.ZodError): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = issue.path[0];
+    if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
+  }
+  return errors;
 }

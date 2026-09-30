@@ -7,14 +7,20 @@ import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/leads/discover", label: "Lead-Suche" },
   { href: "/leads", label: "Leads" },
+  { href: "/qualifizierung", label: "Qualifizierung" },
   { href: "/analysen", label: "Analysen" },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/einstellungen", label: "Einstellungen" },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+  // Längere Treffer gewinnen: /leads/discover markiert nicht zusätzlich /leads.
+  const match = NAV_ITEMS.map((item) => item.href)
+    .filter((candidate) => pathname === candidate || pathname.startsWith(`${candidate}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  return match === href;
 }
 
 /** Seitliche Navigation auf Desktop, ausklappbares Menü auf Mobile. */

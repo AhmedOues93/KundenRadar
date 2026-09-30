@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { requireSessionContext } from "@/lib/auth";
-import { loadDashboardStats, loadRecentLeads } from "@/lib/queries";
+import { loadDashboardStats, loadDiscoveryStats, loadRecentLeads } from "@/lib/queries";
+import { loadDiscoveryRuns } from "@/lib/discovery/queries";
+import { DISCOVERY_RUN_STATUS_LABELS } from "@/lib/discovery/labels";
+import { formatDateTime } from "@/lib/utils";
+import Link from "next/link";
 import { KpiCard } from "@/components/kpi-card";
 import { LeadTable } from "@/components/lead-table";
 import { Card, CardBody, CardHeader, CardTitle, LinkButton, PageHeader } from "@/components/ui";
@@ -10,10 +14,14 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const session = await requireSessionContext();
-  const [stats, recentLeads] = await Promise.all([
+  const [stats, discovery, recentLeads, runs] = await Promise.all([
     loadDashboardStats(session.organizationId),
+    loadDiscoveryStats(session.organizationId),
     loadRecentLeads(session.organizationId),
+    loadDiscoveryRuns(session.organizationId, 3),
   ]);
+
+  const lastRun = runs[0] ?? null;
 
   const kpis = [
     {
@@ -57,10 +65,10 @@ export default async function DashboardPage() {
         description={`Akquise-Überblick für ${session.organizationName}.`}
         actions={
           <>
-            <LinkButton href="/leads/neu" variant="primary">
-              Lead hinzufügen
+            <LinkButton href="/leads/discover" variant="primary">
+              Lead-Suche starten
             </LinkButton>
-            <LinkButton href="/analysen/neu">Website analysieren</LinkButton>
+            <LinkButton href="/leads/neu">Lead hinzufügen</LinkButton>
           </>
         }
       />
@@ -70,6 +78,63 @@ export default async function DashboardPage() {
           <KpiCard key={kpi.label} {...kpi} />
         ))}
       </section>
+
+      <section
+        aria-label="Kennzahlen zur Lead-Suche"
+        className="mt-2.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4"
+      >
+        <KpiCard
+          label="Neu gefundene Leads"
+          value={discovery.fromDiscovery}
+          hint="Aus automatischer Suche"
+          href="/leads?status=ALL"
+        />
+        <KpiCard
+          label="Noch nicht analysiert"
+          value={discovery.notAnalyzed}
+          href="/qualifizierung?analysis=MISSING"
+        />
+        <KpiCard
+          label="Hohe Potenziale"
+          value={discovery.highPotential}
+          hint="Analysepotenzial ab 60"
+          href="/qualifizierung?score=HIGH"
+          accent="text-orange-700"
+        />
+        <KpiCard
+          label="Agenturhinweise"
+          value={discovery.agencyHints}
+          href="/qualifizierung?agency=FOUND"
+        />
+      </section>
+
+      {lastRun ? (
+        <Card className="mt-5">
+          <CardHeader>
+            <CardTitle>Letzte Lead-Suche</CardTitle>
+            <LinkButton href="/leads/discover" variant="ghost" size="sm">
+              Zur Lead-Suche
+            </LinkButton>
+          </CardHeader>
+          <CardBody className="text-sm text-slate-600">
+            <p>
+              <Link href={`/leads/discover?run=${lastRun.id}`} className="font-medium text-slate-900 hover:underline">
+                {lastRun.industry_label ?? lastRun.industry} · {lastRun.resolved_place ?? lastRun.city}
+              </Link>{" "}
+              <span className="text-slate-400">({lastRun.radius_km} km)</span>
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {formatDateTime(lastRun.created_at)} · {DISCOVERY_RUN_STATUS_LABELS[lastRun.status]}
+              {lastRun.status === "SUCCESS"
+                ? ` · ${lastRun.result_count} Treffer, ${lastRun.new_count} neu, ${lastRun.imported_count} importiert`
+                : ""}
+            </p>
+            {lastRun.status === "FAILED" && lastRun.error_message ? (
+              <p className="mt-1 text-xs text-rose-700">{lastRun.error_message}</p>
+            ) : null}
+          </CardBody>
+        </Card>
+      ) : null}
 
       <Card className="mt-5">
         <CardHeader>
