@@ -10,6 +10,8 @@ export type ActionState = {
   message?: string;
   /** Feldbezogene Fehler, Schlüssel = Formularfeldname. */
   errors?: Record<string, string>;
+  /** Zusätzliche Nutzlast, z. B. ein einmalig angezeigter Einladungslink. */
+  data?: Record<string, string>;
 };
 
 export const OK: ActionState = { ok: true };

@@ -4,7 +4,7 @@ import { getSessionContext } from "@/lib/auth";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { OrganizationForm } from "@/components/organization-form";
-import { Card, CardBody } from "@/components/ui";
+import { Panel, PanelBody } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Organisation anlegen" };
 export const dynamic = "force-dynamic";
@@ -29,18 +29,18 @@ export default async function OnboardingPage() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
-        <h1 className="mb-1 text-lg font-semibold tracking-tight text-slate-900">
+        <h1 className="mb-1 text-[16px] font-semibold tracking-[-0.01em] text-slate-900">
           Organisation anlegen
         </h1>
-        <p className="mb-5 text-sm text-slate-500">
+        <p className="mb-3 text-[12.5px] text-slate-500">
           Alle Leads, Analysen und Notizen gehören zu genau einer Organisation. Du wirst
           automatisch deren Inhaber.
         </p>
-        <Card>
-          <CardBody>
+        <Panel>
+          <PanelBody>
             <OrganizationForm />
-          </CardBody>
-        </Card>
+          </PanelBody>
+        </Panel>
       </div>
     </main>
   );

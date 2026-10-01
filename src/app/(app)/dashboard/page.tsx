@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireSessionContext } from "@/lib/auth";
 import { loadDashboardStats, loadDiscoveryStats, loadRecentLeads } from "@/lib/queries";
 import { loadDiscoveryRuns } from "@/lib/discovery/queries";
 import { DISCOVERY_RUN_STATUS_LABELS } from "@/lib/discovery/labels";
-import { formatDateTime } from "@/lib/utils";
-import Link from "next/link";
-import { KpiCard } from "@/components/kpi-card";
+import { Funnel } from "@/components/funnel";
 import { LeadTable } from "@/components/lead-table";
-import { Card, CardBody, CardHeader, CardTitle, LinkButton, PageHeader } from "@/components/ui";
+import {
+  LinkButton,
+  PageHeader,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
+  Stat,
+  StatStrip,
+} from "@/components/ui";
+import { formatDateTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
@@ -17,148 +26,137 @@ export default async function DashboardPage() {
   const [stats, discovery, recentLeads, runs] = await Promise.all([
     loadDashboardStats(session.organizationId),
     loadDiscoveryStats(session.organizationId),
-    loadRecentLeads(session.organizationId),
-    loadDiscoveryRuns(session.organizationId, 3),
+    loadRecentLeads(session.organizationId, 12),
+    loadDiscoveryRuns(session.organizationId, 4),
   ]);
 
   const lastRun = runs[0] ?? null;
-
-  const kpis = [
-    {
-      label: "Gefundene Leads",
-      value: stats.totalLeads,
-      href: "/leads?status=ALL",
-      hint: "Alle erfassten Firmen",
-    },
-    {
-      label: "Analysierte Websites",
-      value: stats.analyzedWebsites,
-      href: "/analysen",
-      hint: "Erfolgreiche Analysen",
-    },
-    {
-      label: "Interessante Leads",
-      value: stats.interestingLeads,
-      hint: "Analysepotenzial ab 60",
-      accent: "text-orange-700",
-    },
-    {
-      label: "Zu kontaktieren",
-      value: stats.byStatus.TO_CONTACT,
-      href: "/leads?status=TO_CONTACT",
-    },
-    { label: "Kontaktierte Leads", value: stats.byStatus.CONTACTED, href: "/leads?status=CONTACTED" },
-    { label: "Termine", value: stats.byStatus.MEETING, href: "/leads?status=MEETING" },
-    { label: "Angebote", value: stats.byStatus.OFFER, href: "/leads?status=OFFER" },
-    {
-      label: "Gewonnene Kunden",
-      value: stats.byStatus.WON,
-      href: "/leads?status=WON",
-      accent: "text-emerald-700",
-    },
-  ];
 
   return (
     <>
       <PageHeader
         title="Dashboard"
-        description={`Akquise-Überblick für ${session.organizationName}.`}
+        meta={session.organizationName}
         actions={
           <>
+            <LinkButton href="/analysen/neu">Website prüfen</LinkButton>
+            <LinkButton href="/leads/neu">Lead hinzufügen</LinkButton>
             <LinkButton href="/leads/discover" variant="primary">
               Lead-Suche starten
             </LinkButton>
-            <LinkButton href="/leads/neu">Lead hinzufügen</LinkButton>
           </>
         }
       />
 
-      <section aria-label="Kennzahlen" className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {kpis.map((kpi) => (
-          <KpiCard key={kpi.label} {...kpi} />
-        ))}
-      </section>
-
-      <section
-        aria-label="Kennzahlen zur Lead-Suche"
-        className="mt-2.5 grid grid-cols-2 gap-2.5 sm:grid-cols-4"
-      >
-        <KpiCard
-          label="Neu gefundene Leads"
+      <StatStrip className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Leads gesamt" value={stats.totalLeads} href="/leads?status=ALL" />
+        <Stat
+          label="Aus Lead-Suche"
           value={discovery.fromDiscovery}
-          hint="Aus automatischer Suche"
           href="/leads?status=ALL"
         />
-        <KpiCard
+        <Stat label="Analysierte Websites" value={stats.analyzedWebsites} href="/analysen" />
+        <Stat
           label="Noch nicht analysiert"
           value={discovery.notAnalyzed}
           href="/qualifizierung?analysis=MISSING"
+          tone={discovery.notAnalyzed > 0 ? "text-amber-700" : undefined}
         />
-        <KpiCard
-          label="Hohe Potenziale"
+        <Stat
+          label="Hohes Potenzial"
           value={discovery.highPotential}
           hint="Analysepotenzial ab 60"
           href="/qualifizierung?score=HIGH"
-          accent="text-orange-700"
+          tone="text-orange-700"
         />
-        <KpiCard
+        <Stat
           label="Agenturhinweise"
           value={discovery.agencyHints}
           href="/qualifizierung?agency=FOUND"
         />
-      </section>
+      </StatStrip>
 
-      {lastRun ? (
-        <Card className="mt-5">
-          <CardHeader>
-            <CardTitle>Letzte Lead-Suche</CardTitle>
-            <LinkButton href="/leads/discover" variant="ghost" size="sm">
-              Zur Lead-Suche
-            </LinkButton>
-          </CardHeader>
-          <CardBody className="text-sm text-slate-600">
-            <p>
-              <Link href={`/leads/discover?run=${lastRun.id}`} className="font-medium text-slate-900 hover:underline">
-                {lastRun.industry_label ?? lastRun.industry} · {lastRun.resolved_place ?? lastRun.city}
-              </Link>{" "}
-              <span className="text-slate-400">({lastRun.radius_km} km)</span>
-            </p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {formatDateTime(lastRun.created_at)} · {DISCOVERY_RUN_STATUS_LABELS[lastRun.status]}
-              {lastRun.status === "SUCCESS"
-                ? ` · ${lastRun.result_count} Treffer, ${lastRun.new_count} neu, ${lastRun.imported_count} importiert`
-                : ""}
-            </p>
-            {lastRun.status === "FAILED" && lastRun.error_message ? (
-              <p className="mt-1 text-xs text-rose-700">{lastRun.error_message}</p>
-            ) : null}
-          </CardBody>
-        </Card>
-      ) : null}
+      <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_20rem]">
+        <div className="min-w-0 space-y-3">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Akquise-Trichter</PanelTitle>
+              <Link href="/pipeline" className="text-[11px] text-slate-500 hover:text-slate-900 hover:underline">
+                Zur Pipeline
+              </Link>
+            </PanelHeader>
+            <Funnel counts={stats.byStatus} />
+          </Panel>
 
-      <Card className="mt-5">
-        <CardHeader>
-          <CardTitle>Neueste Leads</CardTitle>
-          <LinkButton href="/leads" variant="ghost" size="sm">
-            Alle Leads
-          </LinkButton>
-        </CardHeader>
-        <LeadTable leads={recentLeads} />
-      </Card>
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Neueste Leads</PanelTitle>
+              <Link href="/leads" className="text-[11px] text-slate-500 hover:text-slate-900 hover:underline">
+                Alle Leads
+              </Link>
+            </PanelHeader>
+            <LeadTable
+              compact
+              leads={recentLeads}
+              emptyAction={<LinkButton href="/leads/discover">Lead-Suche starten</LinkButton>}
+            />
+          </Panel>
+        </div>
 
-      <Card className="mt-5">
-        <CardHeader>
-          <CardTitle>Hinweis zur Bewertung</CardTitle>
-        </CardHeader>
-        <CardBody className="text-sm text-slate-600">
-          <p>
-            Das ausgewiesene Analysepotenzial beschreibt, wie interessant eine Website für eine
-            manuelle Akquise-Prüfung erscheint. Es ist keine Aussage darüber, ob eine Firma Kunde
-            wird. Ein Agenturhinweis bedeutet, dass auf der Website ein Hinweis auf eine Agentur
-            gefunden wurde – nicht, dass aktuell eine Zusammenarbeit besteht.
-          </p>
-        </CardBody>
-      </Card>
+        <div className="space-y-3">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Letzte Suchläufe</PanelTitle>
+              <Link
+                href="/leads/discover"
+                className="text-[11px] text-slate-500 hover:text-slate-900 hover:underline"
+              >
+                Lead-Suche
+              </Link>
+            </PanelHeader>
+            {lastRun ? (
+              <ul className="divide-y divide-[var(--kr-line)]">
+                {runs.map((run) => (
+                  <li key={run.id} className="px-3 py-1.5">
+                    <Link
+                      href={`/leads/discover?run=${run.id}`}
+                      className="block truncate text-[13px] font-medium text-slate-800 hover:text-blue-700 hover:underline"
+                    >
+                      {run.industry_label ?? run.industry} · {run.city}
+                    </Link>
+                    <p className="text-[11px] text-slate-500">
+                      {formatDateTime(run.created_at)} · {run.radius_km} km ·{" "}
+                      {DISCOVERY_RUN_STATUS_LABELS[run.status]}
+                      {run.status === "SUCCESS"
+                        ? ` · ${run.result_count} Treffer, ${run.imported_count} importiert`
+                        : ""}
+                    </p>
+                    {run.status === "FAILED" && run.error_message ? (
+                      <p className="mt-0.5 text-[11px] text-rose-700">{run.error_message}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <PanelBody className="text-xs text-slate-500">
+                Noch keine Suche durchgeführt.
+              </PanelBody>
+            )}
+          </Panel>
+
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Zur Bewertung</PanelTitle>
+            </PanelHeader>
+            <PanelBody className="text-[12.5px] leading-relaxed text-slate-600">
+              Das Analysepotenzial beschreibt, wie interessant eine Website für eine manuelle
+              Akquise-Prüfung erscheint – nicht, ob eine Firma Kunde wird. Ein Agenturhinweis
+              bedeutet, dass auf der Website ein Hinweis auf eine Agentur gefunden wurde, nicht
+              dass eine Zusammenarbeit besteht.
+            </PanelBody>
+          </Panel>
+        </div>
+      </div>
     </>
   );
 }

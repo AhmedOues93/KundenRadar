@@ -21,20 +21,14 @@ export function SignInForm({ redirectTo }: { redirectTo?: string }) {
   const [state, action] = useActionState(signIn, INITIAL);
 
   return (
-    <form action={action} className="space-y-3">
+    <form action={action} className="space-y-2.5">
       {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
       {!state.ok && state.message ? <Alert tone="error">{state.message}</Alert> : null}
 
-      <Field label="E-Mail-Adresse" hint={state.errors?.email}>
-        <Input
-          name="email"
-          type="email"
-          autoComplete="username"
-          required
-          placeholder="name@agentur.de"
-        />
+      <Field label="E-Mail-Adresse" error={state.errors?.email}>
+        <Input name="email" type="email" autoComplete="username" required placeholder="name@agentur.de" />
       </Field>
-      <Field label="Passwort" hint={state.errors?.password}>
+      <Field label="Passwort" error={state.errors?.password}>
         <Input name="password" type="password" autoComplete="current-password" required />
       </Field>
       <SubmitButton label="Anmelden" />
@@ -46,21 +40,16 @@ export function SignUpForm() {
   const [state, action] = useActionState(signUp, INITIAL);
 
   return (
-    <form action={action} className="space-y-3">
-      {state.message ? (
-        <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
-      ) : null}
+    <form action={action} className="space-y-2.5">
+      {state.message ? <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert> : null}
 
-      <Field label="Name" hint={state.errors?.fullName}>
+      <Field label="Name" error={state.errors?.fullName}>
         <Input name="fullName" autoComplete="name" placeholder="Vor- und Nachname" />
       </Field>
-      <Field label="E-Mail-Adresse" hint={state.errors?.email}>
+      <Field label="E-Mail-Adresse" error={state.errors?.email}>
         <Input name="email" type="email" autoComplete="username" required />
       </Field>
-      <Field
-        label="Passwort"
-        hint={state.errors?.password ?? "Mindestens 8 Zeichen."}
-      >
+      <Field label="Passwort" error={state.errors?.password} hint="Mindestens 8 Zeichen.">
         <Input name="password" type="password" autoComplete="new-password" required minLength={8} />
       </Field>
       <SubmitButton label="Konto erstellen" />

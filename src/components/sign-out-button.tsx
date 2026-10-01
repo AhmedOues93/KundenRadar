@@ -9,9 +9,10 @@ function Inner() {
     <button
       type="submit"
       disabled={pending}
-      className="text-xs font-medium text-slate-500 underline hover:text-slate-800 disabled:opacity-60"
+      title="Abmelden"
+      className="shrink-0 rounded px-1.5 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
     >
-      {pending ? "Wird abgemeldet …" : "Abmelden"}
+      {pending ? "…" : "Abmelden"}
     </button>
   );
 }

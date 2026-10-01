@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { APP_NAME } from "@/lib/constants";
 import { isSupabaseConfigured } from "@/lib/env";
 import { SignInForm, SignUpForm } from "@/components/auth-form";
-import { Card, CardBody } from "@/components/ui";
+import { Panel, PanelBody } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Anmelden" };
 export const dynamic = "force-dynamic";
@@ -14,28 +14,28 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ redirectTo?: string; registrieren?: string }>;
 }) {
+  if (!isSupabaseConfigured) redirect("/setup");
+
   const params = await searchParams;
   const showSignUp = params.registrieren === "1";
-
-  if (!isSupabaseConfigured) redirect("/setup");
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <p className="text-lg font-semibold tracking-tight text-slate-900">{APP_NAME}</p>
-          <p className="mt-1 text-sm text-slate-500">
-            Akquise-Radar für Webagenturen. Interner Zugang.
+        <div className="mb-4 text-center">
+          <p className="text-[15px] font-semibold tracking-[-0.01em] text-slate-900">{APP_NAME}</p>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            Akquise-Radar für Webagenturen · interner Zugang
           </p>
         </div>
 
-        <Card>
-          <CardBody>
+        <Panel>
+          <PanelBody>
             {showSignUp ? <SignUpForm /> : <SignInForm redirectTo={params.redirectTo} />}
-          </CardBody>
-        </Card>
+          </PanelBody>
+        </Panel>
 
-        <p className="mt-4 text-center text-xs text-slate-500">
+        <p className="mt-3 text-center text-[12px] text-slate-500">
           {showSignUp ? (
             <Link href="/login" className="font-medium text-slate-700 underline">
               Zurück zur Anmeldung

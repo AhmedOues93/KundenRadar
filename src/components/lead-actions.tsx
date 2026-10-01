@@ -11,31 +11,36 @@ import type { ActionState } from "@/lib/actions/shared";
 
 const INITIAL: ActionState = { ok: true };
 
-function Pending({ idle, busy }: { idle: string; busy: string }) {
+function Submit({ idle, busy, size = "sm", variant }: {
+  idle: string;
+  busy: string;
+  size?: "xs" | "sm" | "md";
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+}) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" size="sm" disabled={pending}>
+    <Button type="submit" size={size} variant={variant} disabled={pending}>
       {pending ? busy : idle}
     </Button>
   );
 }
 
-/** Status ändern. Abschicken über den Button, damit auch ohne JS gespeichert wird. */
+/** Statuswechsel. Abschicken per Button, damit es auch ohne JavaScript geht. */
 export function StatusChanger({ leadId, status }: { leadId: string; status: LeadStatus }) {
   const [state, action] = useActionState(changeLeadStatus, INITIAL);
 
   return (
-    <form action={action} className="space-y-2">
+    <form action={action} className="space-y-1.5">
       <input type="hidden" name="leadId" value={leadId} />
-      <div className="flex items-center gap-2">
-        <Select name="status" defaultValue={status} aria-label="Status" className="max-w-56">
+      <div className="flex items-center gap-1.5">
+        <Select name="status" defaultValue={status} aria-label="Status" className="flex-1">
           {LEAD_STATUSES.map((value) => (
             <option key={value} value={value}>
               {LEAD_STATUS_LABELS[value]}
             </option>
           ))}
         </Select>
-        <Pending idle="Übernehmen" busy="Speichert …" />
+        <Submit idle="Setzen" busy="…" />
       </div>
       {state.message ? (
         <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
@@ -44,10 +49,7 @@ export function StatusChanger({ leadId, status }: { leadId: string; status: Lead
   );
 }
 
-/**
- * Startet die serverseitige Website-Analyse. Der Button bleibt während des
- * Laufs deaktiviert, weil die Analyse einige Sekunden dauern kann.
- */
+/** Startet die serverseitige Analyse für den hinterlegten Lead. */
 export function AnalyzeButton({
   leadId,
   websiteUrl,
@@ -60,17 +62,16 @@ export function AnalyzeButton({
   if (!websiteUrl) {
     return (
       <Alert tone="warning">
-        Für diesen Lead ist keine Website hinterlegt. Ergänze die Adresse, um eine Analyse zu
-        starten.
+        Keine Website hinterlegt. Ergänze die Adresse, um eine Analyse zu starten.
       </Alert>
     );
   }
 
   return (
-    <form action={action} className="space-y-2">
+    <form action={action} className="space-y-1.5">
       <input type="hidden" name="leadId" value={leadId} />
       <input type="hidden" name="url" value={websiteUrl} />
-      <Pending idle="Website analysieren" busy="Analyse läuft …" />
+      <Submit idle="Website analysieren" busy="Analyse läuft …" variant="primary" />
       {state.message ? (
         <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
       ) : null}
@@ -82,22 +83,26 @@ export function NoteForm({ leadId }: { leadId: string }) {
   const [state, action] = useActionState(addLeadNote, INITIAL);
 
   return (
-    <form action={action} className="space-y-2">
+    <form action={action} className="space-y-1.5">
       <input type="hidden" name="leadId" value={leadId} />
       <Textarea
         name="body"
-        rows={3}
+        rows={2}
         required
         maxLength={5000}
         placeholder="Was ist zu dieser Firma bekannt?"
         aria-label="Neue Notiz"
       />
-      <div className="flex items-center gap-2">
-        <Pending idle="Notiz hinzufügen" busy="Speichert …" />
+      <div className="flex items-center justify-between gap-2">
+        {state.message ? (
+          <Alert tone={state.ok ? "success" : "error"} className="flex-1">
+            {state.message}
+          </Alert>
+        ) : (
+          <span />
+        )}
+        <Submit idle="Notiz speichern" busy="Speichert …" variant="secondary" />
       </div>
-      {state.message ? (
-        <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
-      ) : null}
     </form>
   );
 }
@@ -106,48 +111,43 @@ export function ArchiveButton({ leadId, archived }: { leadId: string; archived: 
   const [state, action] = useActionState(setLeadArchived, INITIAL);
 
   return (
-    <form action={action} className="space-y-2">
+    <form action={action} className="space-y-1.5">
       <input type="hidden" name="leadId" value={leadId} />
       <input type="hidden" name="archive" value={archived ? "false" : "true"} />
-      <ArchiveSubmit archived={archived} />
+      <Submit
+        idle={archived ? "Aus Archiv holen" : "Archivieren"}
+        busy="…"
+        variant={archived ? "secondary" : "danger"}
+      />
       {!state.ok && state.message ? <Alert tone="error">{state.message}</Alert> : null}
     </form>
   );
 }
 
-function ArchiveSubmit({ archived }: { archived: boolean }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" size="sm" variant={archived ? "secondary" : "danger"} disabled={pending}>
-      {pending ? "Bitte warten …" : archived ? "Aus Archiv holen" : "Lead archivieren"}
-    </Button>
-  );
-}
-
-/** Freie Analyse ohne Lead-Bezug, z. B. für eine erste Einschätzung. */
+/** Freie Analyse ohne Lead-Bezug. */
 export function StandaloneAnalysisForm() {
   const [state, action] = useActionState(runAnalysis, INITIAL);
 
   return (
-    <form action={action} className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
+    <form action={action} className="space-y-2">
+      <div className="flex flex-col gap-1.5 sm:flex-row">
         <input
           name="url"
           required
           placeholder="beispielfirma.de"
           aria-label="Website-Adresse"
           inputMode="url"
-          className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm placeholder:text-slate-400"
+          className="h-8 w-full rounded border border-[var(--kr-line-strong)] bg-white px-2 text-[13px] placeholder:text-slate-400 focus:border-blue-600"
         />
-        <Pending idle="Analysieren" busy="Analyse läuft …" />
+        <Submit idle="Analysieren" busy="Analyse läuft …" size="md" variant="primary" />
       </div>
       {state.message ? (
         <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
       ) : null}
-      <p className="text-xs text-slate-500">
-        Es wird ausschliesslich die öffentlich erreichbare Startseite geladen, dazu robots.txt und
-        sitemap.xml sowie eine begrenzte Stichprobe von Links und Bildern. Adressen in privaten
-        Netzen werden abgewiesen.
+      <p className="text-[11.5px] leading-relaxed text-slate-500">
+        Geladen wird die öffentlich erreichbare Startseite, dazu robots.txt und sitemap.xml sowie
+        eine begrenzte Stichprobe von Links und Bildern. Adressen in privaten Netzen werden
+        abgewiesen – auch nach einer Weiterleitung.
       </p>
     </form>
   );

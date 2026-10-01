@@ -11,9 +11,9 @@ const INITIAL: ActionState = { ok: true };
 export function OrganizationForm() {
   const [state, action] = useActionState(createOrganization, INITIAL);
   return (
-    <form action={action} className="space-y-3">
+    <form action={action} className="space-y-2.5">
       {!state.ok && state.message ? <Alert tone="error">{state.message}</Alert> : null}
-      <Field label="Name der Agentur" hint={state.errors?.name}>
+      <Field label="Name der Agentur" error={state.errors?.name}>
         <Input name="name" required minLength={2} maxLength={120} placeholder="Musteragentur GmbH" />
       </Field>
       <Submit />

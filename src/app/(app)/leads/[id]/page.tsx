@@ -5,25 +5,25 @@ import { requireSessionContext } from "@/lib/auth";
 import { loadAnalyses, loadLead } from "@/lib/queries";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { LEAD_SOURCE_LABELS } from "@/lib/constants";
+import { buildHistory } from "@/lib/analysis-history";
 import { loadLeadSource } from "@/lib/discovery/queries";
 import { providerLabel } from "@/lib/discovery/labels";
 import type { LeadActivity, LeadNote } from "@/lib/types";
-import { AgencyBadge, AnalysisStatusBadge, LeadStatusBadge, ScoreBadge } from "@/components/badges";
-import {
-  AnalyzeButton,
-  ArchiveButton,
-  NoteForm,
-  StatusChanger,
-} from "@/components/lead-actions";
+import { AgencyBadge, LeadStatusBadge, ScoreBadge } from "@/components/badges";
+import { AnalysisHistoryPanel } from "@/components/analysis-history";
+import { AnalyzeButton, ArchiveButton, NoteForm, StatusChanger } from "@/components/lead-actions";
 import {
   Alert,
-  Card,
-  CardBody,
-  CardHeader,
-  CardTitle,
+  Blank,
+  DescriptionList,
+  DescriptionRow,
   EmptyState,
   LinkButton,
   PageHeader,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
 } from "@/components/ui";
 import { displayUrl, formatDateTime } from "@/lib/utils";
 
@@ -40,11 +40,7 @@ export async function generateMetadata({
   return { title: lead?.company_name ?? "Lead" };
 }
 
-export default async function LeadDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSessionContext();
   const { id } = await params;
 
@@ -53,7 +49,7 @@ export default async function LeadDetailPage({
 
   const supabase = await createServerSupabase();
   const [analyses, leadSource, { data: notes }, { data: activities }] = await Promise.all([
-    loadAnalyses(session.organizationId, { leadId: lead.id, limit: 10 }),
+    loadAnalyses(session.organizationId, { leadId: lead.id, limit: 50 }),
     loadLeadSource(session.organizationId, lead.id),
     supabase
       .from("lead_notes")
@@ -66,279 +62,224 @@ export default async function LeadDetailPage({
       .select("id, lead_id, type, message, metadata, created_by, created_at")
       .eq("lead_id", lead.id)
       .order("created_at", { ascending: false })
-      .limit(30),
+      .limit(40),
   ]);
 
-  const latestAnalysis = analyses[0] ?? null;
-  const contact = [
-    { label: "Ansprechpartner", value: lead.contact_person },
-    { label: "E-Mail", value: lead.email, href: lead.email ? `mailto:${lead.email}` : null },
-    { label: "Telefon", value: lead.phone, href: lead.phone ? `tel:${lead.phone}` : null },
-    { label: "Strasse", value: lead.street },
-    { label: "Ort", value: [lead.postal_code, lead.city].filter(Boolean).join(" ") || null },
-    { label: "Branche", value: lead.industry },
-    { label: "Quelle", value: LEAD_SOURCE_LABELS[lead.source] },
-  ];
+  const history = buildHistory(analyses);
+  const letzte = analyses[0] ?? null;
 
   return (
     <>
       <PageHeader
         title={lead.company_name}
-        description={
-          lead.website_url
-            ? displayUrl(lead.website_url, 60)
-            : "Keine Website hinterlegt"
+        meta={
+          lead.website_url ? (
+            <a
+              href={lead.website_url}
+              target="_blank"
+              rel="noreferrer noopener nofollow"
+              className="hover:text-blue-700 hover:underline"
+            >
+              {displayUrl(lead.website_url, 50)}
+            </a>
+          ) : (
+            "Keine Website hinterlegt"
+          )
         }
         actions={
           <>
-            <LinkButton href={`/leads/${lead.id}/bearbeiten`}>Bearbeiten</LinkButton>
             <LinkButton href="/leads" variant="ghost">
               Zurück
             </LinkButton>
+            <LinkButton href={`/leads/${lead.id}/bearbeiten`}>Bearbeiten</LinkButton>
           </>
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <LeadStatusBadge status={lead.status} />
         <ScoreBadge score={lead.potential_score} />
         <AgencyBadge hasAgency={lead.has_agency} name={lead.detected_agency_name} />
+        {lead.source === "DISCOVERY" ? (
+          <span className="text-[11px] text-slate-400">
+            Gefunden über {leadSource ? providerLabel(leadSource.provider) : "automatische Suche"}
+          </span>
+        ) : null}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Firma & Kontaktdaten</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <dl className="grid gap-3 sm:grid-cols-2">
-                {contact.map((item) => (
-                  <div key={item.label}>
-                    <dt className="text-xs font-medium text-slate-400">{item.label}</dt>
-                    <dd className="text-sm text-slate-800">
-                      {item.value ? (
-                        item.href ? (
-                          <a href={item.href} className="hover:underline">
-                            {item.value}
-                          </a>
-                        ) : (
-                          item.value
-                        )
-                      ) : (
-                        <span className="text-slate-400">–</span>
-                      )}
-                    </dd>
-                  </div>
-                ))}
-                <div className="sm:col-span-2">
-                  <dt className="text-xs font-medium text-slate-400">Website</dt>
-                  <dd className="text-sm">
-                    {lead.website_url ? (
-                      <a
-                        href={lead.website_url}
-                        target="_blank"
-                        rel="noreferrer noopener nofollow"
-                        className="text-slate-800 hover:underline"
-                      >
-                        {lead.website_url}
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">–</span>
-                    )}
-                  </dd>
-                </div>
-              </dl>
-
-              {lead.notes ? (
-                <div className="mt-4 border-t border-slate-100 pt-3">
-                  <p className="text-xs font-medium text-slate-400">Interne Notiz</p>
-                  <p className="mt-0.5 whitespace-pre-line text-sm text-slate-700">{lead.notes}</p>
-                </div>
-              ) : null}
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Website-Analyse</CardTitle>
-              {latestAnalysis ? (
-                <LinkButton href={`/analysen/${latestAnalysis.id}`} variant="ghost" size="sm">
-                  Details ansehen
-                </LinkButton>
-              ) : null}
-            </CardHeader>
-            <CardBody className="space-y-3">
-              <AnalyzeButton leadId={lead.id} websiteUrl={lead.website_url} />
-
-              {latestAnalysis ? (
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <AnalysisStatusBadge status={latestAnalysis.status} />
-                    <ScoreBadge score={latestAnalysis.score} />
-                    <span className="text-xs text-slate-500">
-                      {formatDateTime(latestAnalysis.created_at)}
-                    </span>
-                  </div>
-                  {latestAnalysis.error_message ? (
-                    <p className="mt-2 text-sm text-rose-700">{latestAnalysis.error_message}</p>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        {/* Hauptspalte */}
+        <div className="min-w-0 space-y-3">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Firma</PanelTitle>
+              </PanelHeader>
+              <DescriptionList>
+                <DescriptionRow label="Ansprechpartner">
+                  {lead.contact_person ?? <Blank />}
+                </DescriptionRow>
+                <DescriptionRow label="E-Mail">
+                  {lead.email ? (
+                    <a href={`mailto:${lead.email}`} className="hover:text-blue-700 hover:underline">
+                      {lead.email}
+                    </a>
                   ) : (
-                    <p className="mt-2 text-sm text-slate-600">
-                      {countProblems(latestAnalysis.findings)} Probleme,{" "}
-                      {countHints(latestAnalysis.findings)} Hinweise festgestellt.
-                    </p>
+                    <Blank />
                   )}
-                  {latestAnalysis.agency_hint?.found ? (
-                    <p className="mt-1.5 text-xs text-slate-500">
-                      Agenturhinweis: {latestAnalysis.agency_hint.evidence ?? "gefunden"}
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">
-                  Für diesen Lead liegt noch keine Analyse vor.
-                </p>
-              )}
-
-              {analyses.length > 1 ? (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Frühere Analysen
-                  </p>
-                  <ul className="mt-1 space-y-1 text-sm">
-                    {analyses.slice(1).map((analysis) => (
-                      <li key={analysis.id}>
-                        <Link
-                          href={`/analysen/${analysis.id}`}
-                          className="text-slate-600 hover:underline"
-                        >
-                          {formatDateTime(analysis.created_at)} ·{" "}
-                          {analysis.score !== null ? `${analysis.score}/100` : analysis.status}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                </DescriptionRow>
+                <DescriptionRow label="Telefon">
+                  {lead.phone ? (
+                    <a href={`tel:${lead.phone}`} className="hover:text-blue-700 hover:underline">
+                      {lead.phone}
+                    </a>
+                  ) : (
+                    <Blank />
+                  )}
+                </DescriptionRow>
+                <DescriptionRow label="Adresse">
+                  {[lead.street, [lead.postal_code, lead.city].filter(Boolean).join(" ")]
+                    .filter(Boolean)
+                    .join(", ") || <Blank />}
+                </DescriptionRow>
+                <DescriptionRow label="Branche">{lead.industry ?? <Blank />}</DescriptionRow>
+                <DescriptionRow label="Quelle">{LEAD_SOURCE_LABELS[lead.source]}</DescriptionRow>
+                {leadSource?.source_url ? (
+                  <DescriptionRow label="Quelldatensatz">
+                    <a
+                      href={leadSource.source_url}
+                      target="_blank"
+                      rel="noreferrer noopener nofollow"
+                      className="hover:text-blue-700 hover:underline"
+                    >
+                      {leadSource.external_id}
+                    </a>
+                  </DescriptionRow>
+                ) : null}
+                <DescriptionRow label="Angelegt">{formatDateTime(lead.created_at)}</DescriptionRow>
+              </DescriptionList>
+              {lead.notes ? (
+                <PanelBody className="border-t border-[var(--kr-line)]">
+                  <p className="mb-0.5 text-[11px] text-slate-500">Interne Notiz</p>
+                  <p className="whitespace-pre-line text-[13px] text-slate-700">{lead.notes}</p>
+                </PanelBody>
               ) : null}
-            </CardBody>
-          </Card>
+            </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Notizen</CardTitle>
-            </CardHeader>
-            <CardBody>
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Analyse-Verlauf</PanelTitle>
+                {letzte ? (
+                  <Link
+                    href={`/analysen/${letzte.id}`}
+                    className="text-[11px] text-slate-500 hover:text-slate-900 hover:underline"
+                  >
+                    Letzte Analyse ansehen
+                  </Link>
+                ) : null}
+              </PanelHeader>
+              <AnalysisHistoryPanel history={history} leadId={lead.id} />
+            </Panel>
+          </div>
+
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Notizen</PanelTitle>
+              <span className="text-[11px] text-slate-400">{(notes ?? []).length}</span>
+            </PanelHeader>
+            <PanelBody>
               <NoteForm leadId={lead.id} />
-            </CardBody>
+            </PanelBody>
             {(notes ?? []).length > 0 ? (
-              <ul className="divide-y divide-slate-100 border-t border-slate-200">
+              <ul className="divide-y divide-[var(--kr-line)] border-t border-[var(--kr-line)]">
                 {((notes ?? []) as LeadNote[]).map((note) => (
-                  <li key={note.id} className="px-4 py-3">
-                    <p className="whitespace-pre-line text-sm text-slate-700">{note.body}</p>
-                    <p className="mt-1 text-[11px] text-slate-400">
+                  <li key={note.id} className="px-3 py-1.5">
+                    <p className="whitespace-pre-line text-[13px] text-slate-700">{note.body}</p>
+                    <p className="mt-0.5 text-[10.5px] text-slate-400">
                       {formatDateTime(note.created_at)}
                     </p>
                   </li>
                 ))}
               </ul>
-            ) : (
-              <EmptyState title="Noch keine Notizen" />
-            )}
-          </Card>
+            ) : null}
+          </Panel>
         </div>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Pipeline-Status</CardTitle>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              <StatusChanger leadId={lead.id} status={lead.status} />
-              <ArchiveButton leadId={lead.id} archived={lead.status === "ARCHIVED"} />
-            </CardBody>
-          </Card>
+        {/* Seitenspalte */}
+        <div className="space-y-3">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Aktionen</PanelTitle>
+            </PanelHeader>
+            <PanelBody className="space-y-2.5">
+              <AnalyzeButton leadId={lead.id} websiteUrl={lead.website_url} />
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">Pipeline-Status</p>
+                <StatusChanger leadId={lead.id} status={lead.status} />
+              </div>
+              <div className="border-t border-[var(--kr-line)] pt-2">
+                <ArchiveButton leadId={lead.id} archived={lead.status === "ARCHIVED"} />
+              </div>
+            </PanelBody>
+          </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Agenturhinweis</CardTitle>
-            </CardHeader>
-            <CardBody className="space-y-2 text-sm">
-              <AgencyBadge hasAgency={lead.has_agency} name={lead.detected_agency_name} />
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Agenturhinweis</PanelTitle>
+            </PanelHeader>
+            <PanelBody className="space-y-1.5 text-[12.5px]">
               {lead.has_agency ? (
-                <Alert tone="info">
-                  Auf der Website wurde ein Hinweis auf eine Webagentur gefunden. Das belegt nicht,
-                  dass aktuell eine Zusammenarbeit besteht – bitte vor der Kontaktaufnahme manuell
-                  prüfen.
-                </Alert>
+                <>
+                  <p className="font-medium text-slate-800">
+                    {lead.detected_agency_name
+                      ? `Hinweis gefunden: ${lead.detected_agency_name}`
+                      : "Hinweis gefunden"}
+                  </p>
+                  {letzte?.agency_hint?.evidence ? (
+                    <p className="rounded bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-600">
+                      {letzte.agency_hint.evidence}
+                    </p>
+                  ) : null}
+                  {letzte?.agency_hint?.location ? (
+                    <p className="text-[11px] text-slate-500">
+                      Fundstelle: {letzte.agency_hint.location}
+                    </p>
+                  ) : null}
+                  <Alert tone="info">
+                    Das belegt nicht, dass aktuell eine Zusammenarbeit besteht – vor der
+                    Kontaktaufnahme manuell prüfen.
+                  </Alert>
+                </>
               ) : (
                 <p className="text-slate-600">
-                  In den geprüften Bereichen wurde kein Agenturhinweis gefunden. Ein fehlender
-                  Hinweis ist kein Beweis dafür, dass keine Agentur betreut wird.
+                  In den geprüften Bereichen wurde kein Agenturhinweis gefunden. Das ist kein
+                  Beweis dafür, dass keine Agentur betreut wird.
                 </p>
               )}
-              {latestAnalysis?.agency_hint?.sourceUrl ? (
-                <p className="text-xs text-slate-500">
-                  Quelle: {displayUrl(latestAnalysis.agency_hint.sourceUrl, 40)}
-                </p>
-              ) : null}
-            </CardBody>
-          </Card>
+            </PanelBody>
+          </Panel>
 
-          {leadSource ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Herkunft</CardTitle>
-              </CardHeader>
-              <CardBody className="space-y-1 text-sm">
-                <p className="text-slate-700">
-                  Gefunden über {providerLabel(leadSource.provider)}.
-                </p>
-                <p className="text-xs text-slate-500">
-                  Kennung: <span className="font-mono">{leadSource.external_id}</span>
-                </p>
-                {leadSource.source_url ? (
-                  <a
-                    href={leadSource.source_url}
-                    target="_blank"
-                    rel="noreferrer noopener nofollow"
-                    className="text-xs text-slate-600 underline"
-                  >
-                    Datensatz der Quelle öffnen
-                  </a>
-                ) : null}
-              </CardBody>
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Aktivitäten</CardTitle>
-            </CardHeader>
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Aktivitäten</PanelTitle>
+            </PanelHeader>
             {(activities ?? []).length > 0 ? (
-              <ol className="divide-y divide-slate-100">
+              <ol className="divide-y divide-[var(--kr-line)]">
                 {((activities ?? []) as LeadActivity[]).map((activity) => (
-                  <li key={activity.id} className="px-4 py-2.5">
-                    <p className="text-sm text-slate-700">{activity.message}</p>
-                    <p className="text-[11px] text-slate-400">
+                  <li key={activity.id} className="px-3 py-1.5">
+                    <p className="text-[12.5px] text-slate-700">{activity.message}</p>
+                    <p className="text-[10.5px] text-slate-400">
                       {formatDateTime(activity.created_at)}
                     </p>
                   </li>
                 ))}
               </ol>
             ) : (
-              <EmptyState title="Noch keine Aktivitäten" />
+              <EmptyState compact title="Noch keine Aktivitäten" />
             )}
-          </Card>
+          </Panel>
         </div>
       </div>
     </>
   );
-}
-
-function countProblems(findings: { severity: string }[] | null): number {
-  return (findings ?? []).filter((finding) => finding.severity === "PROBLEM").length;
-}
-
-function countHints(findings: { severity: string }[] | null): number {
-  return (findings ?? []).filter((finding) => finding.severity === "HINWEIS").length;
 }

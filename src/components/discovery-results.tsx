@@ -2,29 +2,40 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useFormStatus } from "react-dom";
 import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { importCandidates } from "@/lib/actions/discovery";
 import { MATCH_STATUS_LABELS, MATCH_STATUS_TONE, providerLabel } from "@/lib/discovery/labels";
 import type { DiscoveryCandidateRow } from "@/lib/discovery/queries";
-import { Alert, Badge, Button, EmptyState } from "@/components/ui";
+import {
+  Alert,
+  Badge,
+  Blank,
+  Button,
+  EmptyState,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Thead,
+  Tr,
+} from "@/components/ui";
 import type { ActionState } from "@/lib/actions/shared";
-import { displayUrl } from "@/lib/utils";
+import { cn, displayUrl } from "@/lib/utils";
 
 const INITIAL: ActionState = { ok: true };
 
-type Filter = "SENSIBLE" | "NEW" | "WITH_WEBSITE" | "WITHOUT_WEBSITE" | "DUPLICATE" | "ALL";
+type Filter = "SENSIBLE" | "NEW" | "WITHOUT_WEBSITE" | "DUPLICATE" | "ALL";
 
 const FILTERS: { key: Filter; label: string }[] = [
-  { key: "SENSIBLE", label: "Sinnvolle Treffer" },
+  { key: "SENSIBLE", label: "Sinnvoll" },
   { key: "NEW", label: "Neu" },
-  { key: "WITH_WEBSITE", label: "Mit Website" },
   { key: "WITHOUT_WEBSITE", label: "Ohne Website" },
   { key: "DUPLICATE", label: "Duplikate" },
   { key: "ALL", label: "Alle" },
 ];
 
-/** Ein Treffer ist „sinnvoll", wenn er neu ist und eine Website hat. */
+/** Sinnvoll = neu, mit Website, noch nicht importiert. */
 function isSensible(row: DiscoveryCandidateRow): boolean {
   return row.match_status === "NEW" && Boolean(row.website_url) && !row.imported_lead_id;
 }
@@ -35,8 +46,6 @@ function matchesFilter(row: DiscoveryCandidateRow, filter: Filter): boolean {
       return isSensible(row);
     case "NEW":
       return row.match_status === "NEW";
-    case "WITH_WEBSITE":
-      return Boolean(row.website_url);
     case "WITHOUT_WEBSITE":
       return !row.website_url;
     case "DUPLICATE":
@@ -46,10 +55,6 @@ function matchesFilter(row: DiscoveryCandidateRow, filter: Filter): boolean {
   }
 }
 
-/**
- * Trefferliste mit Auswahl. Bewusst als Kartenliste statt als Tabelle, damit
- * die Bedienung auf dem Smartphone vollständig funktioniert.
- */
 export function DiscoveryResults({
   runId,
   candidates,
@@ -65,23 +70,11 @@ export function DiscoveryResults({
     () => candidates.filter((row) => matchesFilter(row, filter)),
     [candidates, filter],
   );
-
-  /** Nur neue, noch nicht importierte Treffer sind auswählbar. */
   const selectable = useMemo(
     () => visible.filter((row) => row.match_status === "NEW" && !row.imported_lead_id),
     [visible],
   );
-
-  const counts = useMemo(
-    () => ({
-      total: candidates.length,
-      sensible: candidates.filter(isSensible).length,
-      withoutWebsite: candidates.filter((row) => !row.website_url).length,
-      duplicates: candidates.filter((row) => row.match_status !== "NEW").length,
-      imported: candidates.filter((row) => row.imported_lead_id).length,
-    }),
-    [candidates],
-  );
+  const sinnvoll = useMemo(() => candidates.filter(isSensible), [candidates]);
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -90,18 +83,6 @@ export function DiscoveryResults({
       else next.add(id);
       return next;
     });
-  }
-
-  function selectAllVisible() {
-    setSelected((current) => {
-      const next = new Set(current);
-      for (const row of selectable) next.add(row.id);
-      return next;
-    });
-  }
-
-  function selectSensible() {
-    setSelected(new Set(candidates.filter(isSensible).map((row) => row.id)));
   }
 
   if (candidates.length === 0) {
@@ -114,179 +95,193 @@ export function DiscoveryResults({
   }
 
   return (
-    <div className="space-y-3">
-      {state.message ? (
-        <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
-      ) : null}
+    <form action={action}>
+      <input type="hidden" name="runId" value={runId} />
+      {[...selected].map((id) => (
+        <input key={id} type="hidden" name="candidateId" value={id} />
+      ))}
 
-      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-        <Stat label="Treffer" value={counts.total} />
-        <Stat label="Sinnvoll" value={counts.sensible} />
-        <Stat label="Ohne Website" value={counts.withoutWebsite} />
-        <Stat label="Duplikate" value={counts.duplicates} />
-      </dl>
-
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Treffer filtern">
-        {FILTERS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => setFilter(option.key)}
-            aria-pressed={filter === option.key}
-            className={
-              filter === option.key
-                ? "rounded-full bg-slate-900 px-2.5 py-1 text-xs font-medium text-white"
-                : "rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            }
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      <form action={action} className="space-y-3">
-        <input type="hidden" name="runId" value={runId} />
-        {[...selected].map((id) => (
-          <input key={id} type="hidden" name="candidateId" value={id} />
-        ))}
-
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
-          <span className="text-xs font-medium text-slate-600">
-            {selected.size} ausgewählt
-          </span>
-          <div className="ml-auto flex flex-wrap gap-1.5">
-            <Button type="button" variant="secondary" size="sm" onClick={selectSensible}>
-              Alle sinnvollen wählen
-            </Button>
-            <Button
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-[var(--kr-line)] bg-slate-50/60 px-3 py-1.5">
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Treffer filtern">
+          {FILTERS.map((option) => (
+            <button
+              key={option.key}
               type="button"
-              variant="secondary"
-              size="sm"
-              onClick={selectAllVisible}
-              disabled={selectable.length === 0}
+              onClick={() => setFilter(option.key)}
+              aria-pressed={filter === option.key}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[11.5px] font-medium transition-colors",
+                filter === option.key
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-200/60",
+              )}
             >
-              Sichtbare wählen
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelected(new Set())}
-              disabled={selected.size === 0}
-            >
-              Auswahl leeren
-            </Button>
-            <ImportButton count={selected.size} />
-          </div>
+              {option.label}
+              <span className="ml-1 opacity-60">
+                {candidates.filter((row) => matchesFilter(row, option.key)).length}
+              </span>
+            </button>
+          ))}
         </div>
 
-        {visible.length === 0 ? (
-          <EmptyState title="Keine Treffer für diesen Filter" />
-        ) : (
-          <ul className="space-y-2">
-            {visible.map((row) => {
-              const isSelectable = row.match_status === "NEW" && !row.imported_lead_id;
-              const checked = selected.has(row.id);
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <span className="text-[12px] text-slate-600">
+            <span className="tabnum font-medium text-slate-900">{selected.size}</span> ausgewählt
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set(sinnvoll.map((row) => row.id)))}
+            disabled={sinnvoll.length === 0}
+          >
+            Alle sinnvollen ({sinnvoll.length})
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setSelected((current) => {
+                const next = new Set(current);
+                for (const row of selectable) next.add(row.id);
+                return next;
+              })
+            }
+            disabled={selectable.length === 0}
+          >
+            Sichtbare
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set())}
+            disabled={selected.size === 0}
+          >
+            Leeren
+          </Button>
+          <ImportButton count={selected.size} />
+        </div>
+      </div>
 
-              return (
-                <li
-                  key={row.id}
-                  className={
-                    checked
-                      ? "rounded-lg border border-slate-400 bg-slate-50 px-3 py-2.5"
-                      : "rounded-lg border border-slate-200 bg-white px-3 py-2.5"
-                  }
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(row.id)}
-                      disabled={!isSelectable}
-                      aria-label={`${row.company_name} auswählen`}
-                      className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 disabled:opacity-40"
-                    />
+      {state.message ? (
+        <div className="px-3 py-2">
+          <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
+        </div>
+      ) : null}
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="text-sm font-medium text-slate-900">{row.company_name}</p>
-                        {row.imported_lead_id ? (
+      {visible.length === 0 ? (
+        <EmptyState compact title="Keine Treffer für diesen Filter" />
+      ) : (
+        <TableWrap>
+          <Table>
+            <Thead>
+              <tr>
+                <Th className="w-8" />
+                <Th>Firma</Th>
+                <Th className="hidden md:table-cell">Adresse</Th>
+                <Th className="hidden lg:table-cell">Website</Th>
+                <Th className="hidden xl:table-cell">Telefon</Th>
+                <Th>Abgleich</Th>
+                <Th className="hidden sm:table-cell">Quelle</Th>
+              </tr>
+            </Thead>
+            <tbody>
+              {visible.map((row) => {
+                const auswaehlbar = row.match_status === "NEW" && !row.imported_lead_id;
+                const checked = selected.has(row.id);
+                return (
+                  <Tr key={row.id} className={cn(checked && "bg-blue-50/50 hover:bg-blue-50")}>
+                    <Td className="w-8">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(row.id)}
+                        disabled={!auswaehlbar}
+                        aria-label={`${row.company_name} auswählen`}
+                        className="h-3.5 w-3.5 rounded border-slate-300 disabled:opacity-30"
+                      />
+                    </Td>
+                    <Td className="max-w-[18rem]">
+                      <span className="block truncate font-medium text-slate-900">
+                        {row.company_name}
+                      </span>
+                      <span className="block truncate text-[11px] text-slate-500 md:hidden">
+                        {[row.street, row.city].filter(Boolean).join(", ")}
+                      </span>
+                    </Td>
+                    <Td className="hidden max-w-[18rem] truncate text-slate-600 md:table-cell">
+                      {[row.street, [row.postal_code, row.city].filter(Boolean).join(" ")]
+                        .filter(Boolean)
+                        .join(", ") || <Blank />}
+                    </Td>
+                    <Td className="hidden max-w-[16rem] lg:table-cell">
+                      {row.website_url ? (
+                        <a
+                          href={row.website_url}
+                          target="_blank"
+                          rel="noreferrer noopener nofollow"
+                          className="block truncate text-slate-600 hover:text-blue-700 hover:underline"
+                        >
+                          {displayUrl(row.website_url, 32)}
+                        </a>
+                      ) : (
+                        <span className="text-[11.5px] text-amber-700">keine Website</span>
+                      )}
+                    </Td>
+                    <Td className="hidden whitespace-nowrap text-slate-600 xl:table-cell">
+                      {row.phone ?? <Blank />}
+                    </Td>
+                    <Td>
+                      {row.imported_lead_id ? (
+                        <Link
+                          href={`/leads/${row.imported_lead_id}`}
+                          className="hover:underline"
+                          title="Importierten Lead öffnen"
+                        >
                           <Badge tone="bg-sky-50 text-sky-700 ring-sky-200">Importiert</Badge>
-                        ) : (
+                        </Link>
+                      ) : row.existing_lead_id ? (
+                        <Link
+                          href={`/leads/${row.existing_lead_id}`}
+                          className="hover:underline"
+                          title="Vorhandenen Lead öffnen"
+                        >
                           <Badge tone={MATCH_STATUS_TONE[row.match_status]}>
                             {MATCH_STATUS_LABELS[row.match_status]}
                           </Badge>
-                        )}
-                        {!row.website_url ? (
-                          <Badge tone="bg-amber-50 text-amber-800 ring-amber-200">
-                            Ohne Website
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {[row.industry, row.street, [row.postal_code, row.city].filter(Boolean).join(" ")]
-                          .filter(Boolean)
-                          .join(" · ") || "Keine Adressangaben"}
-                      </p>
-
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-                        {row.website_url ? (
-                          <a
-                            href={row.website_url}
-                            target="_blank"
-                            rel="noreferrer noopener nofollow"
-                            className="text-slate-700 hover:underline"
-                          >
-                            {displayUrl(row.website_url, 34)}
-                          </a>
-                        ) : null}
-                        {row.phone ? <span className="text-slate-500">{row.phone}</span> : null}
-                        {row.source_url ? (
-                          <a
-                            href={row.source_url}
-                            target="_blank"
-                            rel="noreferrer noopener nofollow"
-                            className="text-slate-400 hover:underline"
-                          >
-                            Quelle: {providerLabel(row.provider)}
-                          </a>
-                        ) : (
-                          <span className="text-slate-400">
-                            Quelle: {providerLabel(row.provider)}
-                          </span>
-                        )}
-                      </div>
-
-                      {row.existing_lead_id ? (
-                        <p className="mt-1 text-xs">
-                          <Link
-                            href={`/leads/${row.existing_lead_id}`}
-                            className="text-slate-600 underline"
-                          >
-                            Vorhandenen Lead öffnen
-                          </Link>
-                        </p>
-                      ) : null}
-                      {row.imported_lead_id ? (
-                        <p className="mt-1 text-xs">
-                          <Link
-                            href={`/leads/${row.imported_lead_id}`}
-                            className="text-slate-600 underline"
-                          >
-                            Importierten Lead öffnen
-                          </Link>
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </form>
-    </div>
+                        </Link>
+                      ) : (
+                        <Badge tone={MATCH_STATUS_TONE[row.match_status]}>
+                          {MATCH_STATUS_LABELS[row.match_status]}
+                        </Badge>
+                      )}
+                    </Td>
+                    <Td className="hidden sm:table-cell">
+                      {row.source_url ? (
+                        <a
+                          href={row.source_url}
+                          target="_blank"
+                          rel="noreferrer noopener nofollow"
+                          className="text-[11.5px] text-slate-400 hover:text-blue-700 hover:underline"
+                        >
+                          {providerLabel(row.provider)}
+                        </a>
+                      ) : (
+                        <span className="text-[11.5px] text-slate-400">
+                          {providerLabel(row.provider)}
+                        </span>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </form>
   );
 }
 
@@ -296,14 +291,5 @@ function ImportButton({ count }: { count: number }) {
     <Button type="submit" size="sm" disabled={pending || count === 0}>
       {pending ? "Import läuft …" : `${count} importieren`}
     </Button>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5">
-      <dt className="text-[11px] text-slate-500">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums text-slate-900">{value}</dd>
-    </div>
   );
 }

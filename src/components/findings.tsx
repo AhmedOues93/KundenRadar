@@ -6,77 +6,76 @@ import {
   scoreBand,
 } from "@/lib/constants";
 import type { Finding, FindingGroup } from "@/lib/types";
-import { Badge, Card, CardBody, CardHeader, CardTitle } from "@/components/ui";
+import { Badge, Panel, PanelBody, PanelHeader, PanelTitle } from "@/components/ui";
+import { cn } from "@/lib/utils";
+
+const SEVERITY_ORDER = { PROBLEM: 0, HINWEIS: 1, INFO: 2, OK: 3 } as const;
 
 /**
- * Stellt die Bewertung nachvollziehbar dar: Gesamtscore, wie er entsteht und
- * jedes Finding mit Bedeutung und Akquise-Relevanz.
+ * Herleitung des Scores: Gesamtwert und jede Position, die dazu beiträgt.
+ * Bewusst als Aufstellung – der Wert muss nachrechenbar sein.
  */
-export function ScoreSummary({
-  score,
-  findings,
-}: {
-  score: number | null;
-  findings: Finding[];
-}) {
+export function ScoreSummary({ score, findings }: { score: number | null; findings: Finding[] }) {
   const band = scoreBand(score);
   const scoring = findings.filter((finding) => finding.points > 0);
-  const rawSum = scoring.reduce((sum, finding) => sum + finding.points, 0);
-  const capped = rawSum > 100;
+  const summe = scoring.reduce((total, finding) => total + finding.points, 0);
+  const gedeckelt = summe > 100;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Analysepotenzial</CardTitle>
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Analysepotenzial</PanelTitle>
         {band ? <Badge tone={band.tone}>{band.label}</Badge> : null}
-      </CardHeader>
-      <CardBody>
-        <div className="flex items-end gap-2">
-          <p className="text-4xl font-semibold tabular-nums text-slate-900">{score ?? "–"}</p>
-          <p className="pb-1 text-sm text-slate-500">von 100</p>
-        </div>
-
-        <p className="mt-2 text-sm text-slate-600">
-          Der Wert beschreibt, wie interessant diese Website für eine manuelle Akquise-Prüfung
-          erscheint. Er ist keine Aussage darüber, ob die Firma Kunde wird.
+      </PanelHeader>
+      <PanelBody>
+        <p className="flex items-baseline gap-1.5">
+          <span className="text-[30px] font-semibold leading-none tabnum text-slate-900">
+            {score ?? "–"}
+          </span>
+          <span className="text-[11px] text-slate-500">von 100</span>
+        </p>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-slate-600">
+          Beschreibt, wie interessant diese Website für eine manuelle Akquise-Prüfung erscheint –
+          keine Aussage darüber, ob die Firma Kunde wird.
         </p>
 
         {scoring.length > 0 ? (
-          <div className="mt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <table className="mt-2.5 w-full text-[12.5px]">
+            <caption className="mb-1 text-left text-[11px] font-medium uppercase tracking-[0.04em] text-slate-400">
               So entsteht der Wert
-            </p>
-            <ul className="mt-1.5 divide-y divide-slate-100 text-sm">
+            </caption>
+            <tbody>
               {scoring
                 .slice()
                 .sort((a, b) => b.points - a.points)
                 .map((finding) => (
-                  <li key={finding.id} className="flex items-baseline justify-between gap-3 py-1.5">
-                    <span className="text-slate-700">{finding.title}</span>
-                    <span className="shrink-0 font-medium tabular-nums text-slate-900">
+                  <tr key={finding.id} className="border-b border-[var(--kr-line)] last:border-b-0">
+                    <td className="py-1 pr-2 text-slate-700">{finding.title}</td>
+                    <td className="w-10 py-1 text-right tabnum font-medium text-slate-900">
                       +{finding.points}
-                    </span>
-                  </li>
+                    </td>
+                  </tr>
                 ))}
-              <li className="flex items-baseline justify-between gap-3 py-1.5 font-semibold">
-                <span className="text-slate-700">Summe</span>
-                <span className="tabular-nums text-slate-900">
-                  {rawSum}
-                  {capped ? " → auf 100 begrenzt" : ""}
-                </span>
-              </li>
-            </ul>
-          </div>
+              <tr className="border-t border-slate-300">
+                <td className="pt-1 pr-2 font-semibold text-slate-700">Summe</td>
+                <td className="pt-1 text-right tabnum font-semibold text-slate-900">
+                  {summe}
+                  {gedeckelt ? <span className="ml-1 text-[10px] font-normal text-slate-400">→ 100</span> : null}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         ) : (
-          <p className="mt-4 text-sm text-slate-500">
-            Es wurden keine punktebringenden Auffälligkeiten festgestellt.
+          <p className="mt-2 text-[12.5px] text-slate-500">
+            Keine punktebringenden Auffälligkeiten festgestellt.
           </p>
         )}
-      </CardBody>
-    </Card>
+      </PanelBody>
+    </Panel>
   );
 }
 
+/** Findings nach Gruppen, für Vertriebsmitarbeiter aufbereitet. */
 export function FindingGroups({ findings }: { findings: Finding[] }) {
   const grouped = new Map<FindingGroup, Finding[]>();
   for (const finding of findings) {
@@ -85,63 +84,54 @@ export function FindingGroups({ findings }: { findings: Finding[] }) {
     grouped.set(finding.group, list);
   }
 
-  const severityOrder = { PROBLEM: 0, HINWEIS: 1, INFO: 2, OK: 3 } as const;
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {FINDING_GROUP_ORDER.filter((group) => grouped.has(group)).map((group) => {
         const items = (grouped.get(group) ?? [])
           .slice()
-          .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-        const problems = items.filter((item) => item.severity === "PROBLEM").length;
+          .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+        const probleme = items.filter((item) => item.severity === "PROBLEM").length;
 
         return (
-          <Card key={group}>
-            <CardHeader>
-              <CardTitle>{FINDING_GROUP_LABELS[group]}</CardTitle>
-              <span className="text-xs text-slate-500">
-                {problems > 0
-                  ? `${problems} ${problems === 1 ? "Problem" : "Probleme"}`
+          <Panel key={group}>
+            <PanelHeader>
+              <PanelTitle>{FINDING_GROUP_LABELS[group]}</PanelTitle>
+              <span className={cn("text-[11px]", probleme > 0 ? "text-rose-700" : "text-slate-400")}>
+                {probleme > 0
+                  ? `${probleme} ${probleme === 1 ? "Problem" : "Probleme"}`
                   : "keine Probleme"}
               </span>
-            </CardHeader>
-            <ul className="divide-y divide-slate-100">
+            </PanelHeader>
+            <ul className="divide-y divide-[var(--kr-line)]">
               {items.map((finding) => (
-                <li key={finding.id} className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
+                <li key={finding.id} className="px-3 py-2">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <Badge tone={FINDING_SEVERITY_TONE[finding.severity]}>
                       {FINDING_SEVERITY_LABELS[finding.severity]}
                     </Badge>
-                    <p className="text-sm font-semibold text-slate-900">{finding.title}</p>
+                    <p className="text-[13px] font-semibold text-slate-900">{finding.title}</p>
                     {finding.points > 0 ? (
-                      <span className="text-xs font-medium tabular-nums text-slate-500">
-                        +{finding.points} Punkte
+                      <span className="tabnum text-[11px] font-medium text-slate-400">
+                        +{finding.points}
+                      </span>
+                    ) : null}
+                    {finding.detail ? (
+                      <span className="ml-auto truncate font-mono text-[11px] text-slate-500">
+                        {finding.detail}
                       </span>
                     ) : null}
                   </div>
-
-                  <dl className="mt-2 space-y-1.5 text-sm">
-                    <div>
-                      <dt className="text-xs font-medium text-slate-400">Bedeutung</dt>
-                      <dd className="text-slate-700">{finding.meaning}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium text-slate-400">Akquise-Relevanz</dt>
-                      <dd className="text-slate-700">{finding.salesRelevance}</dd>
-                    </div>
-                    {finding.detail ? (
-                      <div>
-                        <dt className="text-xs font-medium text-slate-400">Messwert</dt>
-                        <dd className="break-words font-mono text-xs text-slate-600">
-                          {finding.detail}
-                        </dd>
-                      </div>
-                    ) : null}
-                  </dl>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-slate-700">
+                    {finding.meaning}
+                  </p>
+                  <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">
+                    <span className="font-medium text-slate-600">Akquise-Relevanz: </span>
+                    {finding.salesRelevance}
+                  </p>
                 </li>
               ))}
             </ul>
-          </Card>
+          </Panel>
         );
       })}
     </div>

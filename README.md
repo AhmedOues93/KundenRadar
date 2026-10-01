@@ -12,6 +12,8 @@ Enthalten sind:
 * **Phase 2** – automatische Lead-Suche nach Region und Branche über
   OpenStreetMap, Duplikaterkennung, Auswahl und Import, kontrollierte
   Stapel-Analyse und eine Qualifizierungsansicht.
+* **Phase 3** – Team- und Einladungsverwaltung, Analyse-Verlauf je Lead,
+  CSV-Export und eine durchgehend auf Desktop-Arbeit ausgelegte Oberfläche.
 
 ---
 
@@ -53,6 +55,8 @@ Seiten zeigen dann einen Einrichtungshinweis statt eines Fehlers.
    - `supabase/migrations/0004_discovery.sql` – Lead-Suche (Phase 2)
    - `supabase/migrations/0005_single_organization_guard.sql` – Onboarding
      einmalig machen
+   - `supabase/migrations/0006_team_invitations.sql` – Einladungen, Rollen,
+     Schutz der letzten Inhaberin
 3. `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
    `.env.local` eintragen.
 4. Konto über `/login?registrieren=1` anlegen, danach unter `/onboarding` die
@@ -405,6 +409,82 @@ kleinen Bildschirmen zum ausklappbaren Menü, die Lead-Tabelle zur Kartenliste.
 
 ---
 
+## Oberfläche
+
+KundenRadar wird zu rund 90 % am Desktop bedient. Die Oberfläche ist deshalb
+auf Informationsdichte ausgelegt:
+
+* **Datentabellen statt Karten.** Listen sind echte Tabellen mit festem Kopf,
+  Zahlen rechtsbündig und in Tabellenziffern. Auf schmalen Bildschirmen
+  entfallen Nebenspalten, die Tabelle bleibt aber eine Tabelle – es gibt keine
+  zweite Darstellung, die auseinanderlaufen könnte.
+* **Eine Filterzeile.** Filter sitzen in einer Zeile über der Tabelle, als
+  GET-Formular. Die Auswahl steht in der URL, ist teilbar und funktioniert ohne
+  JavaScript.
+* **Kennzahlenleiste statt Kachelwand.** Das Dashboard zeigt sechs Kennzahlen in
+  einer durchgehenden Leiste und darunter den Akquise-Trichter als Balkenreihe –
+  nicht zwölf Einzelkarten.
+* **Zweispaltige Detailseiten.** Lead und Analyse nutzen breite Bildschirme:
+  Inhalt links, Aktionen und Metadaten in einer schmalen Seitenspalte.
+* **Pipeline ohne Scrollen.** Alle acht Spalten passen auf dem Desktop
+  nebeneinander; auf schmalen Bildschirmen wird daraus eine scrollbare Reihe.
+
+Mobil bleibt alles bedienbar (geprüft: kein waagerechter Überlauf bei 390 px),
+ist aber bewusst nachrangig.
+
+---
+
+## Team und Einladungen
+
+Rollen (`OWNER`, `ADMIN`, `MEMBER`) existierten im Datenmodell seit Phase 1,
+ohne Oberfläche. Jetzt vollständig:
+
+* Administratoren laden per E-Mail-Adresse ein und vergeben dabei die Rolle.
+* **Es wird keine E-Mail verschickt** – dafür ist kein Versanddienst
+  eingerichtet, und eine erfundene Erfolgsmeldung wäre irreführend. Der Link
+  wird einmalig angezeigt und von der einladenden Person weitergegeben.
+* Gespeichert wird nur der SHA-256-Hash des Tokens. Wer die Datenbank liest,
+  kann daraus keinen gültigen Link bauen.
+* Eine Einladung gilt 14 Tage und lässt sich **nur von einem Konto mit genau
+  dieser E-Mail-Adresse** einlösen. Prüfung von Token, Ablauf, Rücknahme und
+  Adresse passiert vollständig in der Datenbank (`accept_invitation`).
+* Die Vorschau der Einladung läuft über `invitation_preview`, weil die
+  eingeladene Person noch kein Mitglied ist und die Tabelle nicht lesen darf.
+* Rollen lassen sich ändern, Mitglieder entfernen. Ein Datenbank-Trigger
+  verhindert, dass die **letzte Inhaberin** herabgestuft oder entfernt wird.
+
+---
+
+## Analyse-Verlauf
+
+Jeder Lead zeigt die Entwicklung seines Analysepotenzials: Verlaufslinie,
+Veränderung gegenüber dem letzten Lauf und – als eigentlicher Nutzen – welche
+bewerteten Findings seitdem **behoben** wurden und welche **neu** sind. Ein
+sinkender Wert ist eine Verbesserung und wird grün dargestellt.
+
+Die Skala der Verlaufslinie nutzt die tatsächliche Spannweite (mindestens 20
+Punkte), damit eine Entwicklung von 95 → 89 → 83 sichtbar bleibt und nicht als
+gerade Linie erscheint.
+
+---
+
+## CSV-Export
+
+Zwei Stellen, an denen der Export im Vertriebsalltag wirklich hilft:
+
+* **Leads** (`/leads`) – vollständige Stammdaten für Telefonlisten und
+  Serienbriefe.
+* **Qualifizierung** (`/qualifizierung`) – zusätzlich die fünf stärksten
+  Findings je Lead, damit der Gesprächsaufhänger direkt in der Tabelle steht.
+
+Beide Exporte übernehmen **die gerade gesetzten Filter**, erzeugen Semikolon-CSV
+mit CRLF und UTF-8-BOM (Excel im deutschen Gebietsschema) und entschärfen
+Formel-Einleitungen gegen CSV-Injection. Telefonnummern und negative Zahlen
+bleiben davon ausgenommen – gefährliche Nutzlasten enthalten immer Buchstaben,
+ein sichtbares Hochkomma in jeder Telefonspalte wäre also unnötig.
+
+---
+
 ## Verifikation gegen eine echte Datenbank
 
 Die Migrationen und die RLS-Policies sind nicht nur geschrieben, sondern gegen
@@ -429,6 +509,12 @@ Geprüft und bestätigt:
   aber erlaubt
 - der Profil-Trigger füllt `profiles`, und Kollegen derselben Organisation
   sehen sich gegenseitig
+- Einladungen: die Vorschau funktioniert ohne Mitgliedschaft, die Tabelle selbst
+  bleibt für Eingeladene und für `MEMBER` leer; ein fremdes Konto, ein falscher
+  Token und eine zweite Annahme werden abgewiesen; eine abgelaufene Einladung
+  meldet `EXPIRED`
+- die letzte Inhaberin lässt sich weder herabstufen noch entfernen, mit einer
+  zweiten Inhaberin ist beides möglich
 
 Dabei gefundene und behobene Fehler sind unten unter *Korrekturen* aufgeführt.
 
@@ -440,7 +526,7 @@ Dabei gefundene und behobene Fehler sind unten unter *Korrekturen* aufgeführt.
 npm run test
 ```
 
-203 Tests in zwölf Suiten, mit Schwerpunkt auf den sicherheits- und
+247 Tests in fünfzehn Suiten, mit Schwerpunkt auf den sicherheits- und
 korrektheitskritischen Teilen.
 
 Phase 1:
@@ -474,6 +560,15 @@ Härtung:
   einschliesslich der über Backslash getarnten fremden Hosts
 - `tests/search-term.test.ts` – Aufbereitung von Suchbegriffen für
   PostgREST-Filter und `ilike`-Platzhalter
+
+Phase 3:
+
+- `tests/csv.test.ts` – Maskierung, Formelschutz, deutsche Zahlen- und
+  Datumsformate, Dateinamen
+- `tests/analysis-history.test.ts` – Verlauf, Veränderung, Vergleich der
+  Findings, Skala der Verlaufslinie
+- `tests/team-tokens.test.ts` – Einladungstoken: Zufälligkeit, Hash passend zur
+  Migration, Format- und Statusprüfung
 
 ---
 
@@ -514,12 +609,11 @@ wird – ohne geworfene Ausnahmen.
 
 ## Bewusst noch nicht umgesetzt
 
-Damit die Basis sauber bleibt, ist Folgendes vorbereitet, aber nicht
-angefangen: weitere Datenquellen neben OpenStreetMap (die Abstraktion steht),
-Einladungen per E-Mail und Rollenverwaltung in der Oberfläche, Analyse-Historie
-mit Zeitverlauf, E-Mail-Sequenzen, Abrechnung und Mandanten-Onboarding als
-Self-Service. Das Datenmodell (Organisationen, Rollen, Aktivitäts-Log,
-Herkunftsdaten) unterstützt diese Schritte bereits.
+Vorbereitet, aber nicht angefangen: weitere Datenquellen neben OpenStreetMap
+(die Abstraktion steht), E-Mail-Versand für Einladungen, E-Mail-Sequenzen,
+Abrechnung und Mandanten-Onboarding als Self-Service. Das Datenmodell
+(Organisationen, Rollen, Einladungen, Aktivitäts-Log, Herkunftsdaten)
+unterstützt diese Schritte bereits.
 
 Ebenfalls keine AI: Suche, Analyse und Bewertung arbeiten vollständig
 deterministisch, ohne Claude-, OpenAI- oder vergleichbare API.

@@ -4,7 +4,7 @@ import { requireSessionContext } from "@/lib/auth";
 import { loadLeads } from "@/lib/queries";
 import { PIPELINE_STATUSES } from "@/lib/constants";
 import { PipelineBoard } from "@/components/pipeline-board";
-import { EmptyState, LinkButton, PageHeader } from "@/components/ui";
+import { EmptyState, LinkButton, PageHeader, Panel } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Pipeline" };
 export const dynamic = "force-dynamic";
@@ -15,34 +15,42 @@ export default async function PipelinePage() {
 
   const pipelineStatuses = new Set(PIPELINE_STATUSES);
   const leads = allLeads.filter((lead) => pipelineStatuses.has(lead.status));
-  const outsidePipeline = allLeads.length - leads.length;
+  const ausserhalb = allLeads.length - leads.length;
 
   return (
     <>
       <PageHeader
         title="Pipeline"
-        description="Akquise-Status aller aktiven Leads."
-        actions={<LinkButton href="/leads/neu" variant="primary">Lead hinzufügen</LinkButton>}
+        meta={`${leads.length} aktive Leads`}
+        actions={
+          <>
+            <LinkButton href="/qualifizierung">Qualifizierung</LinkButton>
+            <LinkButton href="/leads/neu" variant="primary">
+              Lead hinzufügen
+            </LinkButton>
+          </>
+        }
       />
 
       {allLeads.length === 0 ? (
-        <EmptyState
-          title="Noch keine Leads in der Pipeline"
-          description="Erfasse einen Lead, um ihn hier zu verfolgen."
-          action={<LinkButton href="/leads/neu">Lead hinzufügen</LinkButton>}
-        />
+        <Panel>
+          <EmptyState
+            title="Noch keine Leads in der Pipeline"
+            description="Erfasse einen Lead oder starte eine Lead-Suche."
+            action={<LinkButton href="/leads/discover">Lead-Suche starten</LinkButton>}
+          />
+        </Panel>
       ) : (
         <>
           <PipelineBoard leads={leads} />
-          {outsidePipeline > 0 ? (
-            <p className="mt-3 text-xs text-slate-500">
-              {outsidePipeline}{" "}
-              {outsidePipeline === 1 ? "weiterer Lead liegt" : "weitere Leads liegen"} in einem
-              Status ausserhalb der Pipeline (z. B. analysiert, verloren).{" "}
-              <Link href="/leads?status=ALL" className="underline">
+          {ausserhalb > 0 ? (
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              {ausserhalb}{" "}
+              {ausserhalb === 1 ? "weiterer Lead liegt" : "weitere Leads liegen"} ausserhalb der
+              Pipeline (z. B. verloren).{" "}
+              <Link href="/leads?status=ALL" className="underline hover:text-slate-900">
                 In der Lead-Liste ansehen
               </Link>
-              .
             </p>
           ) : null}
         </>

@@ -1,185 +1,185 @@
 import type { Metadata } from "next";
 import { hasAdminRights, requireSessionContext } from "@/lib/auth";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { loadInvitations, loadMembers } from "@/lib/team/queries";
 import { ORGANIZATION_ROLE_LABELS, SCORE_BANDS } from "@/lib/constants";
 import { LIMITS } from "@/lib/analysis/fetcher";
 import { SCORE_WEIGHTS } from "@/lib/analysis/score";
-import type { OrganizationRole } from "@/lib/types";
-import { Badge, Card, CardBody, CardHeader, CardTitle, PageHeader } from "@/components/ui";
-import { formatDate } from "@/lib/utils";
+import { BATCH_DEFAULTS } from "@/lib/analysis/batch-limits";
+import { INVITATION_TTL_DAYS } from "@/lib/team/tokens";
+import {
+  InvitationTable,
+  InviteForm,
+  MemberTable,
+} from "@/components/team-management";
+import {
+  Badge,
+  DescriptionList,
+  DescriptionRow,
+  PageHeader,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
+} from "@/components/ui";
 
 export const metadata: Metadata = { title: "Einstellungen" };
 export const dynamic = "force-dynamic";
 
-type MemberRow = {
-  user_id: string;
-  role: OrganizationRole;
-  created_at: string;
-  profiles: { email: string | null; full_name: string | null } | null;
-};
-
 export default async function SettingsPage() {
   const session = await requireSessionContext();
-  const supabase = await createServerSupabase();
+  const canManage = hasAdminRights(session.role);
 
-  const { data: members } = await supabase
-    .from("organization_members")
-    .select("user_id, role, created_at, profiles(email, full_name)")
-    .eq("organization_id", session.organizationId)
-    .order("created_at", { ascending: true });
+  const [members, invitations] = await Promise.all([
+    loadMembers(session.organizationId, session.userId),
+    canManage ? loadInvitations(session.organizationId) : Promise.resolve([]),
+  ]);
 
-  const memberRows = ((members ?? []) as unknown[]).map((row) => {
-    const record = row as MemberRow & { profiles: MemberRow["profiles"] | MemberRow["profiles"][] };
-    const profile = Array.isArray(record.profiles) ? record.profiles[0] : record.profiles;
-    return { ...record, profile: profile ?? null };
-  });
+  const offeneEinladungen = invitations.filter((entry) => entry.status === "PENDING").length;
 
   return (
     <>
       <PageHeader
         title="Einstellungen"
-        description="Organisation, Team und Grundlagen der Bewertung."
+        meta={`${members.length} ${members.length === 1 ? "Mitglied" : "Mitglieder"}${offeneEinladungen > 0 ? ` · ${offeneEinladungen} offene Einladungen` : ""}`}
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Organisation</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Name</dt>
-                <dd className="font-medium text-slate-800">{session.organizationName}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Deine Rolle</dt>
-                <dd className="font-medium text-slate-800">
-                  {ORGANIZATION_ROLE_LABELS[session.role]}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Angemeldet als</dt>
-                <dd className="font-medium text-slate-800">{session.email ?? "–"}</dd>
-              </div>
-            </dl>
-            {!hasAdminRights(session.role) ? (
-              <p className="mt-3 text-xs text-slate-500">
-                Änderungen an der Organisation sind Inhabern und Administratoren vorbehalten.
-              </p>
-            ) : null}
-          </CardBody>
-        </Card>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-3">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Team</PanelTitle>
+              <span className="text-[11px] text-slate-400">
+                {canManage ? "Du kannst Rollen ändern und Mitglieder entfernen." : "Nur Ansicht"}
+              </span>
+            </PanelHeader>
+            <MemberTable members={members} canManage={canManage} ownRole={session.role} />
+          </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Team</CardTitle>
-            <span className="text-xs text-slate-500">{memberRows.length} Mitglieder</span>
-          </CardHeader>
-          <ul className="divide-y divide-slate-100">
-            {memberRows.map((member) => (
-              <li
-                key={member.user_id}
-                className="flex items-center justify-between gap-3 px-4 py-2.5"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">
-                    {member.profile?.full_name ?? member.profile?.email ?? "Unbekannt"}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    Seit {formatDate(member.created_at)}
-                  </p>
-                </div>
-                <Badge>{ORGANIZATION_ROLE_LABELS[member.role]}</Badge>
-              </li>
-            ))}
-          </ul>
-          <CardBody className="border-t border-slate-100 text-xs text-slate-500">
-            Weitere Mitglieder werden in Phase 1 direkt in Supabase eingeladen. Die Rollen OWNER,
-            ADMIN und MEMBER sind im Datenmodell und in den RLS-Policies bereits vorgesehen.
-          </CardBody>
-        </Card>
+          {canManage ? (
+            <>
+              <Panel>
+                <PanelHeader>
+                  <PanelTitle>Mitglied einladen</PanelTitle>
+                </PanelHeader>
+                <PanelBody>
+                  <InviteForm />
+                </PanelBody>
+              </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Bewertungsbänder</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <ul className="space-y-1.5 text-sm">
+              <Panel>
+                <PanelHeader>
+                  <PanelTitle>Einladungen</PanelTitle>
+                  <span className="text-[11px] text-slate-400">
+                    Gültigkeit {INVITATION_TTL_DAYS} Tage
+                  </span>
+                </PanelHeader>
+                <InvitationTable invitations={invitations} />
+              </Panel>
+            </>
+          ) : (
+            <Panel>
+              <PanelBody className="text-[12.5px] text-slate-600">
+                Einladungen und Rollen verwalten Inhaber und Administratoren.
+              </PanelBody>
+            </Panel>
+          )}
+
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Punktvergabe der Bewertung</PanelTitle>
+              <span className="text-[11px] text-slate-400">
+                feste Regeln, keine AI, kein Zufall
+              </span>
+            </PanelHeader>
+            <PanelBody>
+              <dl className="grid gap-x-6 gap-y-0.5 text-[12.5px] sm:grid-cols-2 lg:grid-cols-3">
+                {SCORE_WEIGHT_LABELS.map(([key, label]) => (
+                  <div key={key} className="flex items-baseline justify-between gap-2 border-b border-[var(--kr-line)] py-1">
+                    <dt className="truncate text-slate-600">{label}</dt>
+                    <dd className="tabnum shrink-0 font-medium text-slate-900">
+                      +{SCORE_WEIGHTS[key]}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </PanelBody>
+          </Panel>
+        </div>
+
+        <div className="space-y-3">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Organisation</PanelTitle>
+            </PanelHeader>
+            <DescriptionList>
+              <DescriptionRow label="Name">{session.organizationName}</DescriptionRow>
+              <DescriptionRow label="Deine Rolle">
+                {ORGANIZATION_ROLE_LABELS[session.role]}
+              </DescriptionRow>
+              <DescriptionRow label="Angemeldet als">{session.email ?? "–"}</DescriptionRow>
+            </DescriptionList>
+          </Panel>
+
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Bewertungsbänder</PanelTitle>
+            </PanelHeader>
+            <PanelBody className="space-y-1">
               {SCORE_BANDS.map((band) => (
-                <li key={band.label} className="flex items-center justify-between gap-3">
-                  <span className="tabular-nums text-slate-500">
+                <div key={band.label} className="flex items-center justify-between gap-2">
+                  <span className="tabnum text-[12px] text-slate-500">
                     {band.min}–{band.max}
                   </span>
                   <Badge tone={band.tone}>{band.label}</Badge>
-                </li>
+                </div>
               ))}
-            </ul>
-            <p className="mt-3 text-xs text-slate-500">
-              Der Wert beschreibt das Analysepotenzial einer Website für eine manuelle
-              Akquise-Prüfung. Er ist keine Prognose über einen Vertragsabschluss.
-            </p>
-          </CardBody>
-        </Card>
+              <p className="pt-1 text-[11px] leading-relaxed text-slate-500">
+                Der Wert beschreibt das Analysepotenzial einer Website für eine manuelle
+                Akquise-Prüfung – keine Prognose über einen Abschluss.
+              </p>
+            </PanelBody>
+          </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Grenzen der Website-Analyse</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <dl className="space-y-2 text-sm">
-              <Row label="Timeout pro Anfrage" value={`${LIMITS.requestTimeoutMs / 1000} s`} />
-              <Row label="Gesamtbudget" value={`${LIMITS.totalTimeoutMs / 1000} s`} />
-              <Row label="Weiterleitungen" value={`max. ${LIMITS.maxRedirects}`} />
-              <Row
-                label="Gelesenes HTML"
-                value={`max. ${Math.round(LIMITS.maxHtmlBytes / 1024)} kB`}
-              />
-              <Row label="Geprüfte Links" value={`max. ${LIMITS.maxLinkChecks}`} />
-              <Row label="Geprüfte Bilder" value={`max. ${LIMITS.maxImageChecks}`} />
-              <Row
-                label="Grenze „grosses Bild“"
-                value={`${Math.round(LIMITS.largeImageBytes / 1024)} kB`}
-              />
-            </dl>
-            <p className="mt-3 text-xs text-slate-500">
+          <Panel>
+            <PanelHeader>
+              <PanelTitle>Grenzen der Analyse</PanelTitle>
+            </PanelHeader>
+            <DescriptionList className="text-[12.5px]">
+              <DescriptionRow label="Timeout/Anfrage">
+                {LIMITS.requestTimeoutMs / 1000} s
+              </DescriptionRow>
+              <DescriptionRow label="Gesamtbudget">{LIMITS.totalTimeoutMs / 1000} s</DescriptionRow>
+              <DescriptionRow label="Weiterleitungen">max. {LIMITS.maxRedirects}</DescriptionRow>
+              <DescriptionRow label="Gelesenes HTML">
+                max. {(LIMITS.maxHtmlBytes / 1_000_000).toLocaleString("de-DE")} MB
+              </DescriptionRow>
+              <DescriptionRow label="Geprüfte Links">max. {LIMITS.maxLinkChecks}</DescriptionRow>
+              <DescriptionRow label="Geprüfte Bilder">max. {LIMITS.maxImageChecks}</DescriptionRow>
+              <DescriptionRow label="Stapel-Analyse">
+                {BATCH_DEFAULTS.concurrency} gleichzeitig, max. {BATCH_DEFAULTS.maxItems} je Lauf
+              </DescriptionRow>
+            </DescriptionList>
+            <PanelBody className="border-t border-[var(--kr-line)] text-[11px] leading-relaxed text-slate-500">
               Es wird keine vollständige Domain durchsucht. Adressen in privaten, lokalen oder
               reservierten Netzen werden abgewiesen – auch nach einer Weiterleitung.
-            </p>
-          </CardBody>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Punktvergabe der Bewertung</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <p className="mb-3 text-sm text-slate-600">
-              Alle Punkte entstehen aus festen Regeln. Es kommt keine AI und kein Zufall zum
-              Einsatz.
-            </p>
-            <dl className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
-              {SCORE_WEIGHT_LABELS.map(([key, label]) => (
-                <Row key={key} label={label} value={`+${SCORE_WEIGHTS[key]}`} />
-              ))}
-            </dl>
-          </CardBody>
-        </Card>
+            </PanelBody>
+          </Panel>
+        </div>
       </div>
     </>
   );
 }
 
 const SCORE_WEIGHT_LABELS: [keyof typeof SCORE_WEIGHTS, string][] = [
-  ["httpError", "Startseite antwortet mit Fehlerstatus"],
+  ["httpError", "Fehlerstatus der Startseite"],
   ["noHttps", "Kein HTTPS"],
   ["slowResponse", "Antwortzeit über 2,5 s"],
   ["moderateResponse", "Antwortzeit über 1,2 s"],
   ["manyRedirects", "Mehr als zwei Weiterleitungen"],
   ["titleMissing", "Seitentitel fehlt"],
-  ["titleWeak", "Seitentitel auffällig kurz oder lang"],
+  ["titleWeak", "Titel auffällig kurz/lang"],
   ["descriptionMissing", "Meta-Description fehlt"],
-  ["descriptionWeak", "Meta-Description auffällig lang oder kurz"],
+  ["descriptionWeak", "Description auffällig lang/kurz"],
   ["h1Missing", "H1-Überschrift fehlt"],
   ["h1Multiple", "Mehrere H1-Überschriften"],
   ["viewportMissing", "Viewport-Meta-Tag fehlt"],
@@ -190,18 +190,9 @@ const SCORE_WEIGHT_LABELS: [keyof typeof SCORE_WEIGHTS, string][] = [
   ["structuredDataMissing", "Strukturierte Daten fehlen"],
   ["langMissing", "Sprachangabe fehlt"],
   ["brokenLinkEach", "Je nicht erreichbarer Link"],
-  ["brokenLinkMax", "Obergrenze nicht erreichbare Links"],
+  ["brokenLinkMax", "Obergrenze defekte Links"],
   ["missingAltMax", "Obergrenze Bilder ohne Alt-Text"],
-  ["largeImageEach", "Je auffällig grosses Bild"],
+  ["largeImageEach", "Je grosses Bild"],
   ["largeImageMax", "Obergrenze grosse Bilder"],
   ["thinContent", "Sehr wenig Seiteninhalt"],
 ];
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="shrink-0 font-medium tabular-nums text-slate-800">{value}</dd>
-    </div>
-  );
-}

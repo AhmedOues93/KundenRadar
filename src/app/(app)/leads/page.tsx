@@ -4,7 +4,7 @@ import { loadLeadFacets, loadLeads, type LeadFilters as Filters } from "@/lib/qu
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/types";
 import { LeadFilters } from "@/components/lead-filters";
 import { LeadTable } from "@/components/lead-table";
-import { Card, CardHeader, CardTitle, LinkButton, PageHeader } from "@/components/ui";
+import { LinkButton, PageHeader, Panel } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Leads" };
 export const dynamic = "force-dynamic";
@@ -25,12 +25,13 @@ export default async function LeadsPage({
   const session = await requireSessionContext();
   const params = await searchParams;
 
+  const sort = parseSort(params.sort);
   const filters: Filters = {
     search: params.search?.trim() || undefined,
     status: parseStatus(params.status),
     city: params.city?.trim() || undefined,
     industry: params.industry?.trim() || undefined,
-    sort: parseSort(params.sort),
+    sort,
   };
 
   const [leads, facets] = await Promise.all([
@@ -38,36 +39,58 @@ export default async function LeadsPage({
     loadLeadFacets(session.organizationId),
   ]);
 
+  const query = (overrides: Record<string, string>) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries({
+      search: params.search ?? "",
+      status: params.status ?? "",
+      city: params.city ?? "",
+      industry: params.industry ?? "",
+      sort,
+      ...overrides,
+    })) {
+      if (value) next.set(key, value);
+    }
+    return next.toString();
+  };
+
+  const withScore = leads.filter((lead) => lead.potential_score !== null).length;
+
   return (
     <>
       <PageHeader
         title="Leads"
-        description="Potenzielle Neukunden erfassen, qualifizieren und weiterverfolgen."
-        actions={<LinkButton href="/leads/neu" variant="primary">Lead hinzufügen</LinkButton>}
+        meta={`${leads.length} ${leads.length === 1 ? "Eintrag" : "Einträge"} · ${withScore} analysiert`}
+        actions={
+          <>
+            <LinkButton href="/leads/discover">Lead-Suche</LinkButton>
+            <LinkButton href="/leads/neu" variant="primary">
+              Lead hinzufügen
+            </LinkButton>
+          </>
+        }
       />
 
-      <Card>
+      <Panel>
         <LeadFilters
           values={{
             search: params.search ?? "",
             status: params.status ?? "ACTIVE",
             city: params.city ?? "",
             industry: params.industry ?? "",
-            sort: params.sort ?? "score",
+            sort,
           }}
           cities={facets.cities}
           industries={facets.industries}
+          exportHref={`/api/export/leads?${query({})}`}
         />
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>
-            {leads.length} {leads.length === 1 ? "Lead" : "Leads"}
-          </CardTitle>
-        </CardHeader>
-        <LeadTable leads={leads} />
-      </Card>
+        <LeadTable
+          leads={leads}
+          sort={sort}
+          hrefForSort={(key) => `/leads?${query({ sort: key })}`}
+          emptyAction={<LinkButton href="/leads/neu">Lead hinzufügen</LinkButton>}
+        />
+      </Panel>
     </>
   );
 }
@@ -75,11 +98,9 @@ export default async function LeadsPage({
 function parseStatus(value: string | undefined): Filters["status"] {
   if (!value) return "ACTIVE";
   if (value === "ALL" || value === "ACTIVE") return value;
-  return (LEAD_STATUSES as readonly string[]).includes(value)
-    ? (value as LeadStatus)
-    : "ACTIVE";
+  return (LEAD_STATUSES as readonly string[]).includes(value) ? (value as LeadStatus) : "ACTIVE";
 }
 
-function parseSort(value: string | undefined): Filters["sort"] {
+function parseSort(value: string | undefined): NonNullable<Filters["sort"]> {
   return value === "created" || value === "company" ? value : "score";
 }

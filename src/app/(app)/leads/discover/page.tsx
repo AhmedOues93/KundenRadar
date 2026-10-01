@@ -12,13 +12,13 @@ import { DiscoveryForm } from "@/components/discovery-form";
 import { DiscoveryResults } from "@/components/discovery-results";
 import {
   Alert,
-  Badge,
-  Card,
-  CardBody,
-  CardHeader,
-  CardTitle,
+  EmptyState,
   LinkButton,
   PageHeader,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
 } from "@/components/ui";
 import { formatDateTime } from "@/lib/utils";
 
@@ -34,7 +34,7 @@ export default async function DiscoverPage({
   const params = await searchParams;
 
   const [runs, activeRun] = await Promise.all([
-    loadDiscoveryRuns(session.organizationId, 10),
+    loadDiscoveryRuns(session.organizationId, 12),
     params.run ? loadDiscoveryRun(session.organizationId, params.run) : Promise.resolve(null),
   ]);
 
@@ -48,117 +48,107 @@ export default async function DiscoverPage({
     <>
       <PageHeader
         title="Lead-Suche"
-        description="Firmen nach Ort, Radius und Branche finden und als Leads übernehmen."
-        actions={
-          <LinkButton href="/qualifizierung" variant="secondary">
-            Zur Qualifizierung
-          </LinkButton>
-        }
+        meta={provider.label}
+        description="Firmen nach Ort, Radius und Branche finden, prüfen und als Leads übernehmen."
+        actions={<LinkButton href="/qualifizierung">Zur Qualifizierung</LinkButton>}
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Suche</CardTitle>
-              <Badge>{provider.label}</Badge>
-            </CardHeader>
-            <CardBody>
-              <DiscoveryForm
-                defaults={
-                  activeRun
-                    ? {
-                        city: activeRun.city,
-                        radiusKm: activeRun.radius_km,
-                        industry: activeRun.industry,
-                        maxResults: activeRun.max_results,
-                      }
-                    : undefined
-                }
-              />
-            </CardBody>
-          </Card>
+      <Panel>
+        <PanelBody className="bg-slate-50/50">
+          <DiscoveryForm
+            defaults={
+              activeRun
+                ? {
+                    city: activeRun.city,
+                    radiusKm: activeRun.radius_km,
+                    industry: activeRun.industry,
+                    maxResults: activeRun.max_results,
+                  }
+                : undefined
+            }
+          />
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            Datenquelle: OpenStreetMap über die öffentliche Overpass-API ({provider.attribution}).
+            Eine Abfrage pro Durchlauf. Kein Scraping von Google Maps oder LinkedIn.
+          </p>
+        </PanelBody>
+      </Panel>
 
+      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="min-w-0">
           {activeRun ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  Treffer: {activeRun.industry_label ?? activeRun.industry} ·{" "}
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>
+                  {activeRun.industry_label ?? activeRun.industry} ·{" "}
                   {activeRun.resolved_place ?? activeRun.city}
-                </CardTitle>
-                <span className="text-xs text-slate-500">
-                  {activeRun.radius_km} km · {formatDateTime(activeRun.created_at)}
+                </PanelTitle>
+                <span className="text-[11px] text-slate-500">
+                  {activeRun.radius_km} km · {formatDateTime(activeRun.created_at)} ·{" "}
+                  {activeRun.result_count} Treffer, {activeRun.new_count} neu,{" "}
+                  {activeRun.imported_count} importiert
                 </span>
-              </CardHeader>
-              <CardBody>
-                {activeRun.status === "FAILED" ? (
+              </PanelHeader>
+              {activeRun.status === "FAILED" ? (
+                <PanelBody>
                   <Alert tone="error" title="Suche fehlgeschlagen">
                     {activeRun.error_message ?? "Es liegen keine weiteren Angaben vor."}
                   </Alert>
-                ) : (
-                  <DiscoveryResults runId={activeRun.id} candidates={candidates} />
-                )}
-              </CardBody>
-            </Card>
-          ) : null}
+                </PanelBody>
+              ) : (
+                <DiscoveryResults runId={activeRun.id} candidates={candidates} />
+              )}
+            </Panel>
+          ) : (
+            <Panel>
+              <EmptyState
+                title="Noch keine Suche ausgewählt"
+                description="Starte oben eine Suche oder öffne rechts einen früheren Lauf."
+              />
+            </Panel>
+          )}
         </div>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>So funktioniert es</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
-                <li>Ort, Radius, Branche und maximale Trefferzahl wählen.</li>
-                <li>Trefferliste prüfen – Duplikate und Firmen ohne Website sind markiert.</li>
-                <li>Passende Firmen auswählen und als Leads importieren.</li>
-                <li>
-                  In der <Link href="/qualifizierung" className="underline">Qualifizierung</Link>{" "}
-                  die Websites im Stapel analysieren.
-                </li>
-                <li>Nach Potenzial sortieren, Lead öffnen, in die Pipeline übernehmen.</li>
-              </ol>
-              <p className="mt-3 text-xs text-slate-500">{provider.attribution}</p>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Letzte Suchen</CardTitle>
-            </CardHeader>
-            {runs.length === 0 ? (
-              <CardBody className="text-sm text-slate-500">Noch keine Suche durchgeführt.</CardBody>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {runs.map((run) => (
-                  <li key={run.id} className="px-4 py-2.5">
-                    <Link
-                      href={`/leads/discover?run=${run.id}`}
-                      className="text-sm font-medium text-slate-800 hover:underline"
-                    >
-                      {run.industry_label ?? run.industry} · {run.city}
-                    </Link>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      {formatDateTime(run.created_at)} · {run.radius_km} km ·{" "}
-                      {DISCOVERY_RUN_STATUS_LABELS[run.status]}
+        <Panel className="h-fit">
+          <PanelHeader>
+            <PanelTitle>Suchläufe</PanelTitle>
+          </PanelHeader>
+          {runs.length === 0 ? (
+            <PanelBody className="text-xs text-slate-500">Noch keine Suche durchgeführt.</PanelBody>
+          ) : (
+            <ul className="divide-y divide-[var(--kr-line)]">
+              {runs.map((run) => (
+                <li
+                  key={run.id}
+                  className={
+                    run.id === activeRun?.id
+                      ? "bg-slate-50 px-3 py-1.5"
+                      : "px-3 py-1.5 hover:bg-slate-50"
+                  }
+                >
+                  <Link
+                    href={`/leads/discover?run=${run.id}`}
+                    className="block truncate text-[12.5px] font-medium text-slate-800 hover:text-blue-700"
+                  >
+                    {run.industry_label ?? run.industry} · {run.city}
+                  </Link>
+                  <p className="text-[10.5px] text-slate-500">
+                    {formatDateTime(run.created_at)} · {run.radius_km} km ·{" "}
+                    {DISCOVERY_RUN_STATUS_LABELS[run.status]}
+                  </p>
+                  {run.status === "SUCCESS" ? (
+                    <p className="text-[10.5px] text-slate-400">
+                      {run.result_count} Treffer · {run.new_count} neu · {run.imported_count}{" "}
+                      importiert · {providerLabel(run.provider)}
                     </p>
-                    {run.status === "SUCCESS" ? (
-                      <p className="text-[11px] text-slate-500">
-                        {run.result_count} Treffer · {run.new_count} neu · {run.imported_count}{" "}
-                        importiert
-                      </p>
-                    ) : null}
-                    {run.status === "FAILED" && run.error_message ? (
-                      <p className="text-[11px] text-rose-600">{run.error_message}</p>
-                    ) : null}
-                    <p className="text-[11px] text-slate-400">{providerLabel(run.provider)}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
+                  ) : run.error_message ? (
+                    <p className="line-clamp-2 text-[10.5px] text-rose-700">{run.error_message}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
       </div>
     </>
   );

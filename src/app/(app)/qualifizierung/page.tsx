@@ -7,7 +7,7 @@ import {
 } from "@/lib/queries";
 import { QualificationFilters } from "@/components/qualification-filters";
 import { QualificationList } from "@/components/qualification-list";
-import { Card, CardBody, CardHeader, CardTitle, LinkButton, PageHeader } from "@/components/ui";
+import { LinkButton, PageHeader, Panel } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Qualifizierung" };
 export const dynamic = "force-dynamic";
@@ -46,11 +46,19 @@ export default async function QualificationPage({
     loadLeadFacets(session.organizationId),
   ]);
 
+  const exportParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) exportParams.set(key, value);
+  }
+
+  const offen = rows.filter((row) => !row.analysis && row.lead.website_url).length;
+
   return (
     <>
       <PageHeader
         title="Qualifizierung"
-        description="Analysierte Leads nach Analysepotenzial sortiert – höchstes zuerst."
+        meta={`${rows.length} ${rows.length === 1 ? "Lead" : "Leads"}${offen > 0 ? ` · ${offen} offen` : ""}`}
+        description="Nach Analysepotenzial sortiert – höchstes zuerst. Der Wert ist ein technischer Akquise-Hinweis, keine Aussage über einen Abschluss."
         actions={
           <LinkButton href="/leads/discover" variant="primary">
             Neue Lead-Suche
@@ -58,7 +66,7 @@ export default async function QualificationPage({
         }
       />
 
-      <Card>
+      <Panel>
         <QualificationFilters
           values={{
             score: params.score ?? "ANY",
@@ -70,33 +78,10 @@ export default async function QualificationPage({
           }}
           cities={facets.cities}
           industries={facets.industries}
+          exportHref={`/api/export/qualifizierung?${exportParams.toString()}`}
         />
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>
-            {rows.length} {rows.length === 1 ? "Lead" : "Leads"}
-          </CardTitle>
-        </CardHeader>
-        <CardBody>
-          <QualificationList rows={rows} />
-        </CardBody>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>Hinweis zur Einordnung</CardTitle>
-        </CardHeader>
-        <CardBody className="text-sm text-slate-600">
-          <p>
-            Der Score ist ein technischer Akquise-Potenzial-Wert: er beschreibt, wie interessant
-            eine Website für eine manuelle Prüfung erscheint. Er sagt nicht aus, dass eine Firma
-            Kunde werden wird. Ein Agenturhinweis bedeutet, dass auf der Website ein Hinweis auf
-            eine Agentur gefunden wurde – nicht, dass ein aktuelles Vertragsverhältnis besteht.
-          </p>
-        </CardBody>
-      </Card>
+        <QualificationList rows={rows} />
+      </Panel>
     </>
   );
 }
