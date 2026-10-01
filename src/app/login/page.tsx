@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { APP_NAME } from "@/lib/constants";
 import { isSupabaseConfigured } from "@/lib/env";
 import { SignInForm, SignUpForm } from "@/components/auth-form";
 import { Card, CardBody } from "@/components/ui";
-import { ConfigNotice } from "@/components/config-notice";
 
 export const metadata: Metadata = { title: "Anmelden" };
 export const dynamic = "force-dynamic";
@@ -17,13 +17,7 @@ export default async function LoginPage({
   const params = await searchParams;
   const showSignUp = params.registrieren === "1";
 
-  if (!isSupabaseConfigured) {
-    return (
-      <main className="min-h-screen">
-        <ConfigNotice />
-      </main>
-    );
-  }
+  if (!isSupabaseConfigured) redirect("/setup");
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">

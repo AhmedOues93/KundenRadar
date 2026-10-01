@@ -133,3 +133,39 @@ describe("planImport", () => {
     expect(plan.toInsert[0]!.candidate.externalId).toBe("node/9");
   });
 });
+
+/**
+ * Die Treffertabelle hat einen eindeutigen Schlüssel auf
+ * (Lauf, Quelle, external_id). `startDiscovery` filtert Wiederholungen daher
+ * vor dem Speichern heraus; diese Regel wird hier festgehalten.
+ */
+function dedupeByExternalId<T extends { candidate: DiscoveryCandidate }>(matches: T[]): T[] {
+  const seen = new Set<string>();
+  return matches.filter((match) => {
+    if (seen.has(match.candidate.externalId)) return false;
+    seen.add(match.candidate.externalId);
+    return true;
+  });
+}
+
+describe("Treffer vor dem Speichern entdoppeln", () => {
+  it("behält je externer Kennung nur den ersten Treffer", () => {
+    const matches = [
+      { candidate: candidate({ externalId: "node/1", companyName: "Erst" }) },
+      { candidate: candidate({ externalId: "node/1", companyName: "Wiederholung" }) },
+      { candidate: candidate({ externalId: "way/2", companyName: "Zweit" }) },
+    ];
+
+    const result = dedupeByExternalId(matches);
+    expect(result).toHaveLength(2);
+    expect(result.map((entry) => entry.candidate.companyName)).toEqual(["Erst", "Zweit"]);
+  });
+
+  it("lässt eindeutige Treffer unverändert", () => {
+    const matches = [
+      { candidate: candidate({ externalId: "node/1" }) },
+      { candidate: candidate({ externalId: "node/2" }) },
+    ];
+    expect(dedupeByExternalId(matches)).toHaveLength(2);
+  });
+});

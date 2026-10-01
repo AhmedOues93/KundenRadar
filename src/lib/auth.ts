@@ -2,6 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import type { OrganizationRole } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 export type SessionContext = {
@@ -19,6 +20,10 @@ export type SessionContext = {
  * existiert. Jede geschützte Seite ruft diese Funktion auf.
  */
 export async function requireSessionContext(): Promise<SessionContext> {
+  // Layout und Seite rendern in Next parallel: ohne diese Prüfung würde die
+  // Seite trotz Einrichtungshinweis im Layout eine Ausnahme werfen.
+  if (!isSupabaseConfigured) redirect("/setup");
+
   const supabase = await createServerSupabase();
   const {
     data: { user },
@@ -53,6 +58,8 @@ export async function requireSessionContext(): Promise<SessionContext> {
 
 /** Wie `requireSessionContext`, wirft aber nicht und leitet nicht um. */
 export async function getSessionContext(): Promise<SessionContext | null> {
+  if (!isSupabaseConfigured) return null;
+
   const supabase = await createServerSupabase();
   const {
     data: { user },

@@ -5,7 +5,6 @@ import { isSupabaseConfigured } from "@/lib/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { OrganizationForm } from "@/components/organization-form";
 import { Card, CardBody } from "@/components/ui";
-import { ConfigNotice } from "@/components/config-notice";
 
 export const metadata: Metadata = { title: "Organisation anlegen" };
 export const dynamic = "force-dynamic";
@@ -16,13 +15,7 @@ export const dynamic = "force-dynamic";
  * mandantenfaehig ist.
  */
 export default async function OnboardingPage() {
-  if (!isSupabaseConfigured) {
-    return (
-      <main className="min-h-screen">
-        <ConfigNotice />
-      </main>
-    );
-  }
+  if (!isSupabaseConfigured) redirect("/setup");
 
   const supabase = await createServerSupabase();
   const {

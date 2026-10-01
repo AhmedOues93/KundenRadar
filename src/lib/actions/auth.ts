@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { type ActionState, failed, fieldErrors, text } from "./shared";
 
@@ -29,9 +30,8 @@ export async function signIn(_prev: ActionState, formData: FormData): Promise<Ac
     return failed("E-Mail oder Passwort ist nicht korrekt.");
   }
 
-  const redirectTo = text(formData.get("redirectTo"));
   revalidatePath("/", "layout");
-  redirect(isSafeRedirect(redirectTo) ? redirectTo : "/dashboard");
+  redirect(safeRedirectTarget(text(formData.get("redirectTo"))));
 }
 
 export async function signUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -93,14 +93,15 @@ export async function createOrganization(
 
   const { error } = await supabase.rpc("create_organization", { org_name: name });
   if (error) {
+    // Das Onboarding ist einmalig (siehe Migration 0005). Wer schon zu einer
+    // Organisation gehört, landet direkt in der Anwendung.
+    if (error.message.includes("gehört bereits zu einer Organisation")) {
+      revalidatePath("/", "layout");
+      redirect("/dashboard");
+    }
     return failed(`Organisation konnte nicht angelegt werden: ${error.message}`);
   }
 
   revalidatePath("/", "layout");
   redirect("/dashboard");
-}
-
-/** Nur relative Pfade zulassen, damit kein Open Redirect entsteht. */
-function isSafeRedirect(target: string): boolean {
-  return target.startsWith("/") && !target.startsWith("//");
 }

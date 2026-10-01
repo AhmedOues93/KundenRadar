@@ -1,9 +1,9 @@
+import { redirect } from "next/navigation";
 import { requireSessionContext } from "@/lib/auth";
 import { isSupabaseConfigured } from "@/lib/env";
 import { ORGANIZATION_ROLE_LABELS } from "@/lib/constants";
 import { AppNav } from "@/components/app-nav";
 import { SignOutButton } from "@/components/sign-out-button";
-import { ConfigNotice } from "@/components/config-notice";
 import { initials } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +14,7 @@ export const dynamic = "force-dynamic";
  * werden also nie gerendert.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  if (!isSupabaseConfigured) {
-    return (
-      <div className="min-h-screen">
-        <ConfigNotice />
-      </div>
-    );
-  }
+  if (!isSupabaseConfigured) redirect("/setup");
 
   const session = await requireSessionContext();
 

@@ -51,6 +51,8 @@ Seiten zeigen dann einen Einrichtungshinweis statt eines Fehlers.
    - `supabase/migrations/0002_rls.sql` – Row Level Security
    - `supabase/migrations/0003_bootstrap_organization.sql` – Onboarding-Funktion
    - `supabase/migrations/0004_discovery.sql` – Lead-Suche (Phase 2)
+   - `supabase/migrations/0005_single_organization_guard.sql` – Onboarding
+     einmalig machen
 3. `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
    `.env.local` eintragen.
 4. Konto über `/login?registrieren=1` anlegen, danach unter `/onboarding` die
@@ -403,13 +405,42 @@ kleinen Bildschirmen zum ausklappbaren Menü, die Lead-Tabelle zur Kartenliste.
 
 ---
 
+## Verifikation gegen eine echte Datenbank
+
+Die Migrationen und die RLS-Policies sind nicht nur geschrieben, sondern gegen
+PostgreSQL 16 ausgeführt und geprüft. Dafür genügt ein lokaler Cluster plus ein
+kleiner Nachbau der Supabase-Umgebung (`auth.users`, `auth.uid()`, die Rollen
+`anon` und `authenticated`).
+
+Geprüft und bestätigt:
+
+- alle fünf Migrationen laufen in Reihenfolge fehlerfrei durch
+- zwei Organisationen sehen ausschliesslich ihre eigenen Leads, Analysen,
+  Notizen, Suchläufe und Treffer
+- ein Nutzer kann einen fremden Lead auch mit bekannter Kennung weder lesen
+  noch ändern
+- `anon` (nicht angemeldet) sieht in keiner Tabelle eine Zeile und darf nicht
+  schreiben – obwohl die Tabellenrechte wie in Supabase gesetzt sind, greift
+  also tatsächlich RLS
+- `MEMBER` darf die Organisation nicht umbenennen und keine Leads löschen,
+  `OWNER` darf es
+- Slug-Kollisionen werden hochgezählt (`agentur-alpha`, `agentur-alpha-1`)
+- dieselbe Domain ist je Organisation einmalig, in einer anderen Organisation
+  aber erlaubt
+- der Profil-Trigger füllt `profiles`, und Kollegen derselben Organisation
+  sehen sich gegenseitig
+
+Dabei gefundene und behobene Fehler sind unten unter *Korrekturen* aufgeführt.
+
+---
+
 ## Tests
 
 ```bash
 npm run test
 ```
 
-184 Tests in zehn Suiten, mit Schwerpunkt auf den sicherheits- und
+203 Tests in zwölf Suiten, mit Schwerpunkt auf den sicherheits- und
 korrektheitskritischen Teilen.
 
 Phase 1:
@@ -436,6 +467,48 @@ Phase 2:
   Suchparameter, Auswahl des besseren Agenturhinweises
 - `tests/analysis-batch.test.ts` – Stapel-Analyse: Reihenfolge, Parallelität,
   Mindestabstand, Fehlerisolierung, Zeitbudget
+
+Härtung:
+
+- `tests/safe-redirect.test.ts` – Weiterleitungsziele nach dem Login,
+  einschliesslich der über Backslash getarnten fremden Hosts
+- `tests/search-term.test.ts` – Aufbereitung von Suchbegriffen für
+  PostgREST-Filter und `ilike`-Platzhalter
+
+---
+
+## Korrekturen aus der Nachprüfung
+
+Vier Befunde aus dem Test gegen eine echte Datenbank und dem Lauf der gebauten
+Anwendung:
+
+**Onboarding war nicht einmalig.** `create_organization` liess sich mehrfach
+aufrufen. Da die Anwendung immer die erste Mitgliedschaft verwendet, waren
+weitere Organisationen samt Daten über die Oberfläche nicht mehr erreichbar.
+Migration `0005` erzwingt jetzt, was der Kommentar der Funktion schon behauptet
+hatte. Eine Einladung in eine andere Organisation bleibt möglich, weil sie
+direkt in `organization_members` schreibt.
+
+**Open Redirect über Backslash.** Nach dem Login wurde `?redirectTo=` nur auf
+Präfixe geprüft (`/` ja, `//` nein). Browser normalisieren Backslashes in URLs
+jedoch zu Schrägstrichen, weshalb `/\evil.example` als `//evil.example` gelesen
+wird – also als Weiterleitung auf eine fremde Domain. Das Ziel wird nun gegen
+einen festen Ursprung aufgelöst und verworfen, sobald es woanders landet
+(`src/lib/safe-redirect.ts`).
+
+**Suchbegriffe konnten den Filterausdruck zerlegen.** Mehrere Suchspalten
+werden als `or=(a.ilike.x,b.ilike.y)` übergeben; PostgREST trennt an Kommas und
+Klammern. Ein Komma im Suchfeld zerlegte den Ausdruck – ein Backslash davor ist
+dort nicht der vorgesehene Mechanismus. Mandantenübergreifend lecken konnte
+dabei nichts, weil die `organization_id`-Bedingung und RLS separat greifen; die
+Abfrage filterte aber falsch oder brach ab. Strukturelle Zeichen werden jetzt
+entfernt und Platzhalter maskiert (`src/lib/search-term.ts`).
+
+**Ausnahme pro Anfrage ohne Konfiguration.** Layout und Seite rendern in Next
+parallel. Das Layout zeigte den Einrichtungshinweis, die Seite lief aber
+weiter, griff auf Supabase zu und warf. Der Hinweis erschien nur zufällig. Es
+gibt jetzt die öffentliche Seite `/setup`, auf die ohne Zugangsdaten umgeleitet
+wird – ohne geworfene Ausnahmen.
 
 ---
 

@@ -89,9 +89,19 @@ export async function startDiscovery(
     const existing = await loadExistingLeadRefs(supabase, session.organizationId);
     const matches = classifyCandidates(result.candidates, existing);
 
-    if (matches.length > 0) {
+    // Die Treffertabelle hat einen eindeutigen Schlüssel auf
+    // (Lauf, Quelle, external_id). Liefert die Quelle denselben Datensatz
+    // zweimal, soll das nicht den gesamten Lauf scheitern lassen.
+    const seenExternalIds = new Set<string>();
+    const insertable = matches.filter((match) => {
+      if (seenExternalIds.has(match.candidate.externalId)) return false;
+      seenExternalIds.add(match.candidate.externalId);
+      return true;
+    });
+
+    if (insertable.length > 0) {
       const { error: candidateError } = await supabase.from("lead_discovery_candidates").insert(
-        matches.map((match) => ({
+        insertable.map((match) => ({
           organization_id: session.organizationId,
           discovery_run_id: run.id,
           provider: match.candidate.provider,
@@ -117,7 +127,7 @@ export async function startDiscovery(
       if (candidateError) throw new Error(candidateError.message);
     }
 
-    const newCount = matches.filter((match) => match.status === "NEW").length;
+    const newCount = insertable.filter((match) => match.status === "NEW").length;
 
     await supabase
       .from("lead_discovery_runs")
@@ -126,9 +136,9 @@ export async function startDiscovery(
         resolved_place: result.resolvedPlace,
         center_lat: result.centerLat,
         center_lon: result.centerLon,
-        result_count: matches.length,
+        result_count: insertable.length,
         new_count: newCount,
-        duplicate_count: matches.length - newCount,
+        duplicate_count: insertable.length - newCount,
         finished_at: new Date().toISOString(),
       })
       .eq("id", run.id)

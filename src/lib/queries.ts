@@ -1,5 +1,6 @@
 import "server-only";
 
+import { likePattern, sanitizeSearchTerm } from "@/lib/search-term";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { Lead, LeadStatus, WebsiteAnalysis } from "@/lib/types";
 
@@ -98,11 +99,11 @@ export async function loadLeads(
     query = query.eq("status", filters.status);
   }
 
-  if (filters.city) query = query.ilike("city", `%${escapeLike(filters.city)}%`);
-  if (filters.industry) query = query.ilike("industry", `%${escapeLike(filters.industry)}%`);
+  if (filters.city) query = query.ilike("city", likePattern(filters.city));
+  if (filters.industry) query = query.ilike("industry", likePattern(filters.industry));
 
-  if (filters.search) {
-    const term = `%${escapeLike(filters.search)}%`;
+  if (sanitizeSearchTerm(filters.search ?? "")) {
+    const term = likePattern(filters.search as string);
     query = query.or(
       [
         `company_name.ilike.${term}`,
@@ -199,11 +200,6 @@ export async function loadAnalysis(
   return data as WebsiteAnalysis;
 }
 
-/** Schützt vor unbeabsichtigten Wildcards in Nutzereingaben. */
-function escapeLike(value: string): string {
-  return value.replace(/[%_\\,]/g, (match) => `\\${match}`);
-}
-
 /* -------------------------------------------------------------------------- */
 /* Qualifizierung (Phase 2)                                                   */
 /* -------------------------------------------------------------------------- */
@@ -245,10 +241,10 @@ export async function loadQualificationRows(
     .eq("organization_id", organizationId)
     .neq("status", "ARCHIVED");
 
-  if (filters.industry) query = query.ilike("industry", `%${escapeLike(filters.industry)}%`);
-  if (filters.city) query = query.ilike("city", `%${escapeLike(filters.city)}%`);
-  if (filters.search) {
-    const term = `%${escapeLike(filters.search)}%`;
+  if (filters.industry) query = query.ilike("industry", likePattern(filters.industry));
+  if (filters.city) query = query.ilike("city", likePattern(filters.city));
+  if (sanitizeSearchTerm(filters.search ?? "")) {
+    const term = likePattern(filters.search as string);
     query = query.or([`company_name.ilike.${term}`, `domain.ilike.${term}`].join(","));
   }
 
